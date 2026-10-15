@@ -144,8 +144,17 @@ def validate(spec: dict, samples: list[Sample]) -> tuple[list[str], dict]:
             problems.append(f"'rows' path: {where}")
         else:
             problems += explain_fields(spec, s.doc, s.meta) or ["rows match but every row is dropped; check 'where' and value formats"]
-    if fares and not (50 <= min(fares) and max(fares) <= 2_000_000):
-        problems.append(f"fares range {min(fares):.0f}–{max(fares):.0f} looks wrong; 'fare' should be a total price, not an id or a count")
+    if fares:
+        # Judge the bulk, not the extremes: a few outliers (another currency, a premium cabin)
+        # are dropped at extraction; a mostly-implausible column means the wrong field.
+        srt = sorted(fares)
+        median = srt[len(srt) // 2]
+        odd = sum(1 for f in fares if not 50 <= f <= 2_000_000) / len(fares)
+        stats.update(fare_median=round(median), implausible_share=round(odd, 3))
+        if odd > 0.1 or not 100 <= median <= 1_000_000:
+            hint = ("values look like ids, counts or minor units (paise/cents)" if median < 100 or median > 1_000_000
+                    else "some rows may be in another currency (map 'currency' per row) or be a multi-passenger total")
+            problems.append(f"{odd:.0%} of fares are outside 50–2,000,000 (median {median:.0f}, max {srt[-1]:.0f}); {hint}")
     if with_rows and matched < round(0.5 * with_rows):
         problems.append(f"the searched route appears in only {matched} of {with_rows} responses; origin/destination paths may be wrong or swapped")
     return problems, stats
@@ -164,6 +173,8 @@ def map_supplier(supplier: str, filename: str, samples: list[Sample], *, attempt
         else:
             problems, stats = validate(spec, samples)
         log(f"  attempt {n}: {'OK' if not problems else '; '.join(problems)}  {stats or ''}")
+        if spec is not None:
+            log(f"    spec: {json.dumps(spec, separators=(',', ':'))[:600]}")
         if not problems:
             return {"supplier": supplier, "files": [filename], **{k: spec[k] for k in ("rows", "where", "fields", "date_format") if k in spec},
                     "generated_by": f"{model} (validated on {stats['samples_with_rows']}/{stats['samples']} responses)",

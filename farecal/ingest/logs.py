@@ -81,9 +81,11 @@ class Report:
     files_by_supplier: dict = field(default_factory=dict)
     unmapped: dict = field(default_factory=dict)
     errors: dict = field(default_factory=dict)
+    dropped_currency: int = 0
+    dropped_implausible: int = 0
 
 
-def observations(root: str | Path, spec_dir: str | Path, *, env: str = "production",
+def observations(root: str | Path, spec_dir: str | Path, *, env: str = "production", base_currency: str = "INR",
                  oneway_economy_only: bool = True, limit: int | None = None) -> tuple[pd.DataFrame, Report]:
     """env tags every row (e.g. "production", "test") so sandbox fares can be filtered out later."""
     root = Path(root)
@@ -129,6 +131,13 @@ def observations(root: str | Path, spec_dir: str | Path, *, env: str = "producti
     cols = ["searched_at", "origin", "destination", "departure_date", "fare", "currency", "supplier"]
     df = pd.DataFrame(rows, columns=cols)
     if len(df):
+        # Suppliers that don't state a currency quote the agency's own; other currencies are
+        # dropped rather than mixed into an INR calendar. Implausible values are dropped too.
+        df["currency"] = df["currency"].fillna(base_currency)
+        other = df["currency"] != base_currency
+        odd = ~df["fare"].between(50, 2_000_000)
+        rep.dropped_currency, rep.dropped_implausible = int(other.sum()), int((odd & ~other).sum())
+        df = df[~other & ~odd]
         # Lowest fare per search, supplier, route and date: that's what the agent saw.
         df = (df.groupby(cols[:4] + cols[5:], dropna=False)["fare"].min().reset_index())
     df["env"] = env

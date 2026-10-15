@@ -102,7 +102,7 @@ def test_validation_flags_implausible_fares():
     assert gemma.validate(ids, _samples())[0]
     doc = {"payload": {"sectors": [{"origin": "DEL", "destination": "DXB", "dates": [{"date": "2026-11-03", "price": 7}]}]}}
     problems, _ = gemma.validate(FIXED_SPEC, [gemma.Sample(doc, META, "x")])
-    assert any("looks wrong" in p for p in problems)
+    assert any("outside 50–2,000,000" in p for p in problems)
 
 
 def test_map_supplier_retries_with_feedback_then_saves():
@@ -188,3 +188,14 @@ def test_object_values_wildcard_for_id_keyed_maps():
     assert sorted(r["fare"] for r in extract(spec, doc, META)) == [4800.0, 5200.0]
     from farecal.ingest.spec import explain_rows
     assert explain_rows(doc, "faresAvailable{*}.fares[*]").startswith("'fares' does not exist under faresAvailable{*}")
+
+
+def test_validation_tolerates_a_few_outliers_but_not_a_wrong_column():
+    doc = {"payload": {"sectors": [{"origin": "DEL", "destination": "DXB", "dates": [
+        {"date": f"2026-11-{d:02d}", "price": 15000 + d} for d in range(1, 20)] + [{"date": "2026-11-20", "price": 2_749_928}]}]}}
+    problems, stats = gemma.validate(FIXED_SPEC, [gemma.Sample(doc, META, "x")] * 3)
+    assert not problems and stats["implausible_share"] == 0.05
+    ids = {"payload": {"sectors": [{"origin": "DEL", "destination": "DXB",
+                                    "dates": [{"date": "2026-11-03", "price": 98765432}] * 5}]}}
+    problems, _ = gemma.validate(FIXED_SPEC, [gemma.Sample(ids, META, "x")] * 3)
+    assert any("ids, counts or minor units" in p for p in problems)
