@@ -27,8 +27,14 @@ FOLDER = re.compile(r"^flights-search(?:-batch)?-([0-9a-f]{12})_")
 KEEP_META = ("ts", "origin", "destination", "departure_date", "trip_type", "cabin_class")
 
 
+FLOW_IN_ID = re.compile(r"flights-search(?:-batch)?-([0-9a-f]{12})")
+
+
 def link_key(request_id: str) -> str:
-    return request_id.replace("-", "")[18:30]
+    """Portal searches carry a UUID (folder id = chars 18-29 without dashes);
+    scans and other callers may carry the flow name itself."""
+    m = FLOW_IN_ID.search(request_id)
+    return m.group(1) if m else request_id.replace("-", "")[18:30]
 
 
 def load_searches(root: Path) -> dict[str, dict]:
