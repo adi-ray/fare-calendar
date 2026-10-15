@@ -199,3 +199,14 @@ def test_validation_tolerates_a_few_outliers_but_not_a_wrong_column():
                                     "dates": [{"date": "2026-11-03", "price": 98765432}] * 5}]}}
     problems, _ = gemma.validate(FIXED_SPEC, [gemma.Sample(ids, META, "x")] * 3)
     assert any("ids, counts or minor units" in p for p in problems)
+
+
+def test_feedback_names_the_fix_when_a_level_is_repeated():
+    from farecal.ingest.spec import explain_fields
+    doc = {"fares": [{"passengerFares": [{"publishedFare": 5100, "passengerType": "ADT"}]}]}
+    spec = {"rows": "fares[*].passengerFares[*]", "fields": {"fare": "passengerFares[*].publishedFare",
+            "origin": "meta.origin", "destination": "meta.destination", "departure_date": "meta.departure_date"}}
+    msg = " ".join(explain_fields(spec, doc, META))
+    assert "use 'publishedFare'" in msg
+    spec["fields"]["fare"] = "^.fares[*].passengerFares[*].publishedFare"
+    assert "use '^.passengerFares[*].publishedFare'" in " ".join(explain_fields(spec, doc, META))

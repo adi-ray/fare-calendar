@@ -121,20 +121,30 @@ def _explain_field(path: str, stack: list, doc) -> str | None:
     if path.startswith(("=", "meta.")):
         return None
     if path.startswith("$."):
-        node, rest, start = doc, path[2:], "the document root"
+        node, rest, start, prefix = doc, path[2:], "the document root", "$."
     else:
         up = len(path) - len(path.lstrip("^"))
         if up >= len(stack):
             return f"'{'^' * up}' climbs above the top wildcard level"
         node, rest = stack[-1 - up], path[up:].lstrip(".")
         start = "the row" if up == 0 else f"{'^' * up} (the row's ancestor)"
+        prefix = "^" * up + ("." if up else "")
     walked = []
-    for key, idxs in _split(rest) if rest else []:
+    segs = _split(rest) if rest else []
+    for n, (key, idxs) in enumerate(segs):
         child = _get(node, key)
         if child is None:
             keys = sorted(node) if isinstance(node, dict) else sorted({k for x in _as_list(node) if isinstance(x, dict) for k in x})
             at = start + ("." + ".".join(walked) if walked else "")
-            return f"'{key}' missing at {at}; keys there: {keys[:20]}"
+            # Common slip: repeating a level the row already sits in. Name the fix outright.
+            later = next((m for m in range(n + 1, len(segs)) if segs[m][0] in keys), None)
+            fix = ""
+            if later is not None:
+                done = ".".join(walked)
+                tail = ".".join(k + "".join(_fmt(i) for i in ix) for k, ix in segs[later:])
+                fix = (f" — but '{segs[later][0]}' IS here: paths continue from where you already are, "
+                       f"so use '{prefix}{done + '.' if done else ''}{tail}'")
+            return f"'{key}' missing at {at}; keys there: {keys[:20]}{fix}"
         for i in idxs:
             lst = _children(child, i) if i in ("*", "~") else _as_list(child)
             child = next((x for x in lst if x not in (None, "", {}, [])), None) if i in ("*", "~") else (lst[int(i)] if int(i) < len(lst) else None)
