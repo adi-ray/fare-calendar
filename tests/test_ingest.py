@@ -129,3 +129,42 @@ def test_prompt_never_exceeds_budget():
     big = {"items": [{"k" * 30: "v" * 300} for _ in range(5000)]}
     msgs = gemma.prompt_for("s", "f.json", gemma.Sample(big, META, "f.json"))
     assert len(msgs[-1]["content"]) < gemma.MAX_SAMPLE_CHARS + 500
+
+
+def test_explain_rows_says_where_the_path_breaks():
+    from farecal.ingest.spec import explain_rows
+    msg = explain_rows(FIXED_DEP, "payload.sector[*].dates[*]")
+    assert "'sector' does not exist under payload" in msg and "sectors" in msg
+    assert explain_rows(FIXED_DEP, FIXED_SPEC["rows"]) is None
+
+
+def test_explain_fields_lists_empty_fields_and_available_keys():
+    from farecal.ingest.spec import explain_fields
+    bad = {**FIXED_SPEC, "fields": {**FIXED_SPEC["fields"], "fare": "amount"}}
+    msgs = explain_fields(bad, FIXED_DEP)
+    assert any("'fare'" in m for m in msgs) and any("price" in m for m in msgs)
+
+
+def test_feedback_carries_diagnostics_into_the_retry():
+    calls = []
+
+    def fake_llm(messages, model):
+        calls.append(messages)
+        return json.dumps({**FIXED_SPEC, "rows": "payload.sector[*].dates[*]"}) if len(calls) == 1 else json.dumps(FIXED_SPEC)
+
+    assert gemma.map_supplier("x", "f.json", _samples(), llm=fake_llm, log=lambda *_: None)
+    assert "does not exist under payload" in calls[1][-1]["content"]
+
+
+@pytest.mark.parametrize("raw", ['```json\n{"rows": "a[*]"}\n```', 'Here you go: {"rows": "a[*]"} hope it helps'])
+def test_parse_reply_tolerates_fences_and_prose(raw):
+    assert gemma.parse_reply(raw) == {"rows": "a[*]"}
+
+
+def test_sample_shape_reaches_deep_xml_like_nesting():
+    deep = node = {}
+    for i in range(25):
+        node[f"l{i}"] = {}
+        node = node[f"l{i}"]
+    node["Amount"] = "4500"
+    assert '"Amount"' in gemma.sample_shape(deep)

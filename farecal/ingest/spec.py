@@ -73,6 +73,47 @@ def extract(spec: dict, doc, meta: dict | None = None) -> list[dict]:
     return out
 
 
+def explain_rows(doc, path: str) -> str | None:
+    """Where a 'rows' path stops matching, and which keys exist there. None if it matches."""
+    states = [doc]
+    walked = []
+    for key, idxs in _split(path):
+        nxt = []
+        for node in states:
+            child = _get(node, key)
+            pending = [child]
+            for i in idxs:
+                pending = [x for c in pending for x in (_as_list(c) if i == "*" else _as_list(c)[int(i):int(i) + 1])]
+            nxt += [c for c in pending if c is not None]
+        if not nxt:
+            keys = sorted({k for n in states if isinstance(n, dict) for k in n} |
+                          {k for n in states if isinstance(n, list) for x in n if isinstance(x, dict) for k in x})
+            at = ".".join(walked) or "(document root)"
+            return f"'{key}' does not exist under {at}; keys there: {keys[:25]}"
+        walked.append(key + "".join(f"[{i}]" for i in idxs))
+        states = nxt
+    return None
+
+
+def explain_fields(spec: dict, doc, meta: dict | None = None) -> list[str]:
+    """For rows that match, report fields that resolve to nothing and the keys a row has."""
+    stacks = _expand(doc, spec["rows"])[:50]
+    if not stacks:
+        return []
+    out = []
+    for name, path in spec["fields"].items():
+        if not any(_resolve(path, s, doc, meta or {}) not in (None, "") for s in stacks):
+            out.append(f"field '{name}' path '{path}' is empty on every row")
+    if out:
+        row = stacks[0][-1]
+        parent = stacks[0][-2] if len(stacks[0]) > 1 else None
+        if isinstance(row, dict):
+            out.append(f"a row has keys {sorted(row)[:25]}")
+        if isinstance(parent, dict):
+            out.append(f"one level up (^.) has keys {sorted(parent)[:25]}")
+    return out
+
+
 # ---- paths ---------------------------------------------------------------
 def _expand(doc, path: str) -> list[list]:
     """Walk 'a.b[*].c[*]'. Each result is the stack of elements at every wildcard level."""

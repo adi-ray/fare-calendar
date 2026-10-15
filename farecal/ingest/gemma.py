@@ -13,12 +13,15 @@ import os
 import urllib.request
 from dataclasses import dataclass
 
-from .spec import SpecError, check_spec, extract
+from .spec import SpecError, check_spec, explain_fields, explain_rows, extract
 from .tree import compact
 
 BASE_URL = os.environ.get("GEMMA_BASE_URL", "http://localhost:11434/v1")
 MODEL = os.environ.get("GEMMA_MODEL", "gemma4")
-MAX_SAMPLE_CHARS = 14_000
+# Ollama's default context (~4k tokens) silently drops the start of a long prompt,
+# which is where the instructions live. The native API lets us raise it.
+NUM_CTX = int(os.environ.get("GEMMA_NUM_CTX", "16384"))
+MAX_SAMPLE_CHARS = 20_000
 
 SYSTEM = """You map flight-supplier API responses to a fare table.
 Return ONLY a JSON object (a "spec") with keys: rows, fields, optional where, optional date_format.
@@ -54,10 +57,17 @@ class Sample:
     name: str
 
 
+def sample_shape(doc) -> str:
+    """Deep enough to reach fares in nested SOAP responses, small enough for the context."""
+    for items, chars, depth in ((2, 40, 40), (1, 30, 40), (1, 16, 40)):
+        shape = json.dumps(compact(doc, max_items=items, max_str=chars, max_depth=depth), ensure_ascii=False)
+        if len(shape) <= MAX_SAMPLE_CHARS:
+            return shape
+    return shape[:MAX_SAMPLE_CHARS] + " …(truncated)"
+
+
 def prompt_for(supplier: str, filename: str, sample: Sample) -> list[dict]:
-    shape = json.dumps(compact(sample.doc), ensure_ascii=False)
-    if len(shape) > MAX_SAMPLE_CHARS:
-        shape = json.dumps(compact(sample.doc, max_items=1, max_str=24), ensure_ascii=False)[:MAX_SAMPLE_CHARS] + " …(truncated)"
+    shape = sample_shape(sample.doc)
     meta = {k: sample.meta.get(k) for k in ("origin", "destination", "departure_date")}
     return [
         {"role": "system", "content": SYSTEM},
@@ -67,13 +77,30 @@ def prompt_for(supplier: str, filename: str, sample: Sample) -> list[dict]:
     ]
 
 
-def chat(messages: list[dict], model: str = MODEL, base_url: str = BASE_URL, timeout: int = 600) -> str:
-    body = json.dumps({"model": model, "messages": messages, "temperature": 0,
-                       "response_format": {"type": "json_object"}}).encode()
-    req = urllib.request.Request(f"{base_url.rstrip('/')}/chat/completions", data=body,
-                                 headers={"Content-Type": "application/json"})
+def chat(messages: list[dict], model: str = MODEL, base_url: str = BASE_URL, timeout: int = 900) -> str:
+    """Ollama's native API (bigger context, JSON mode); any other OpenAI-compatible server otherwise."""
+    if ":11434" in base_url or os.environ.get("GEMMA_API") == "ollama":
+        root = base_url.rstrip("/").removesuffix("/v1")
+        body = {"model": model, "messages": messages, "stream": False, "format": "json",
+                "options": {"temperature": 0, "num_ctx": NUM_CTX}}
+        url, pick = f"{root}/api/chat", lambda r: r["message"]["content"]
+    else:
+        body = {"model": model, "messages": messages, "temperature": 0, "response_format": {"type": "json_object"}}
+        url, pick = f"{base_url.rstrip('/')}/chat/completions", lambda r: r["choices"][0]["message"]["content"]
+    req = urllib.request.Request(url, data=json.dumps(body).encode(), headers={"Content-Type": "application/json"})
     with urllib.request.urlopen(req, timeout=timeout) as r:
-        return json.loads(r.read())["choices"][0]["message"]["content"]
+        return pick(json.loads(r.read()))
+
+
+def parse_reply(raw: str) -> dict:
+    """Tolerate code fences or prose around the JSON object."""
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError:
+        start, end = raw.find("{"), raw.rfind("}")
+        if start == -1 or end <= start:
+            raise
+        return json.loads(raw[start:end + 1])
 
 
 def validate(spec: dict, samples: list[Sample]) -> tuple[list[str], dict]:
@@ -108,7 +135,14 @@ def validate(spec: dict, samples: list[Sample]) -> tuple[list[str], dict]:
     stats = {"samples": len(samples), "samples_with_rows": with_rows, "rows": len(fares),
              "searched_route_found": matched, "multi_date": multi_date}
     if with_rows < max(1, round(0.6 * len(samples))):
-        problems.append(f"only {with_rows} of {len(samples)} responses produced rows; check 'rows' path, wildcards and 'where'")
+        problems.append(f"only {with_rows} of {len(samples)} responses produced rows")
+        # Say exactly where it breaks, so the retry has something to work with.
+        s = samples[0]
+        where = explain_rows(s.doc, spec["rows"])
+        if where:
+            problems.append(f"'rows' path: {where}")
+        else:
+            problems += explain_fields(spec, s.doc, s.meta) or ["rows match but every row is dropped; check 'where' and value formats"]
     if fares and not (50 <= min(fares) and max(fares) <= 2_000_000):
         problems.append(f"fares range {min(fares):.0f}–{max(fares):.0f} looks wrong; 'fare' should be a total price, not an id or a count")
     if with_rows and matched < round(0.5 * with_rows):
@@ -122,9 +156,9 @@ def map_supplier(supplier: str, filename: str, samples: list[Sample], *, attempt
     for n in range(1, attempts + 1):
         raw = llm(messages, model=model)
         try:
-            spec = json.loads(raw)
+            spec = parse_reply(raw)
         except json.JSONDecodeError:
-            problems, stats = ["reply was not valid JSON"], {}
+            problems, stats = [f"reply was not valid JSON (started: {raw[:80]!r})"], {}
             spec = None
         else:
             problems, stats = validate(spec, samples)

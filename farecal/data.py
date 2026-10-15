@@ -50,6 +50,7 @@ def clean(df: pd.DataFrame) -> pd.DataFrame:
     df["destination"] = df["destination"].astype(str).str.strip().str.upper()
     if "currency" not in df:
         df["currency"] = "INR"
+    df["currency"] = df["currency"].fillna("INR")  # suppliers that don't state one quote INR
     df = df.dropna(subset=["searched_at", "departure_date", "fare"])
     df = df[df["fare"] > 0]
     df["lead_days"] = (df["departure_date"] - df["searched_at"].dt.normalize()).dt.days
