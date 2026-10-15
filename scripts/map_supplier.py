@@ -56,6 +56,7 @@ if __name__ == "__main__":
     ap.add_argument("--all", action="store_true", help="map every supplier without a spec yet")
     ap.add_argument("--specs", default="suppliers")
     ap.add_argument("--model", default=gemma.MODEL)
+    ap.add_argument("--attempts", type=int, default=3, help="tries per supplier, each with feedback from the last")
     a = ap.parse_args()
     root, spec_dir = Path(a.logs), Path(a.specs)
 
@@ -71,7 +72,7 @@ if __name__ == "__main__":
             print(f"{sup}: no responses found, skipped")
             continue
         print(f"{sup}: {filename}, {len(samples)} sample responses -> {a.model}")
-        spec = gemma.map_supplier(sup, filename, samples, model=a.model)
+        spec = gemma.map_supplier(sup, filename, samples, model=a.model, attempts=a.attempts)
         if spec:
             out = spec_dir / f"{sup}.json"
             out.write_text(json.dumps(spec, indent=2), encoding="utf-8")

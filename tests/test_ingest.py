@@ -168,3 +168,23 @@ def test_sample_shape_reaches_deep_xml_like_nesting():
         node = node[f"l{i}"]
     node["Amount"] = "4500"
     assert '"Amount"' in gemma.sample_shape(deep)
+
+
+def test_explain_fields_says_where_inside_a_field_path_it_breaks():
+    from farecal.ingest.spec import explain_fields
+    doc = {"r": [{"seg": [{"leg": {"from": {"code": "DEL"}}}], "p": 5000}]}
+    spec = {"rows": "r[*]", "fields": {"fare": "p", "departure_date": "=x", "destination": "=y",
+                                       "origin": "seg[*].from.code"}}
+    msg = " ".join(explain_fields(spec, doc))
+    assert "'from' missing at the row.seg[*]" in msg and "leg" in msg
+    spec["fields"]["origin"] = "seg[*].leg.from"
+    assert "ends on an object" in " ".join(explain_fields(spec, doc))
+
+
+def test_object_values_wildcard_for_id_keyed_maps():
+    doc = {"faresAvailable": {"0~A~X1": {"totals": {"fareTotal": 5200}}, "0~A~X2": {"totals": {"fareTotal": 4800}}}}
+    spec = {"rows": "faresAvailable{*}", "fields": {"fare": "totals.fareTotal", "origin": "meta.origin",
+            "destination": "meta.destination", "departure_date": "meta.departure_date"}}
+    assert sorted(r["fare"] for r in extract(spec, doc, META)) == [4800.0, 5200.0]
+    from farecal.ingest.spec import explain_rows
+    assert explain_rows(doc, "faresAvailable{*}.fares[*]").startswith("'fares' does not exist under faresAvailable{*}")

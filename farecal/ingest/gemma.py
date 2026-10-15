@@ -28,7 +28,8 @@ Return ONLY a JSON object (a "spec") with keys: rows, fields, optional where, op
 
 Path language:
 - "a.b.c" walks keys from the current row. "a[0]" takes an index. "a[*].b" takes the first non-empty.
-- rows: ONE path that contains [*] and lands on the objects that each carry ONE price (expand every list on the way with [*]).
+- "{*}" walks the VALUES of an object whose keys are ids/codes (e.g. {"0~AB~X1": {...}, "0~AB~X2": {...}}): "faresAvailable{*}".
+- rows: ONE path that contains [*] or {*} and lands on the objects that each carry ONE price (expand every list on the way with [*]).
 - "^.x" reads x from one [*] level above the row, "^^.x" two levels above. "$.a.b" reads from the document root.
 - "meta.origin", "meta.destination", "meta.departure_date" are the agent's search. Use them ONLY when the response itself does not contain that value for each row.
 - "=VALUE" is a constant. Constants are allowed ONLY for currency.
