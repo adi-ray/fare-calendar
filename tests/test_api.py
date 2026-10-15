@@ -86,3 +86,20 @@ def test_artifact_matches_live_engine(art):
     priced = [d for d in m["days"] if d["fare"]]
     assert priced and all(d["date"] >= "2026-06-01" for d in priced)
     assert all(d["low"] <= d["fare"] <= d["high"] for d in priced if d["source"] == "estimate")
+
+
+def test_seed_file_used_when_upload_is_gone_and_newer_wins(tmp_path, monkeypatch, art):
+    seed = tmp_path / "seed.json"
+    seed.write_text(json.dumps({**art, "as_of": "2026-06-03"}))
+    monkeypatch.setenv("FARECAL_ARTIFACT_SEED", str(seed))
+    c, path = client(tmp_path, monkeypatch, art)           # uploaded copy as_of 2026-06-01
+    assert c.get("/api/health").json()["as_of"] == "2026-06-03"   # seed is newer
+    path.unlink()                                            # free-tier restart wiped the upload
+    import farecal.api as api
+    api._state.clear()
+    assert c.get("/api/health").json()["as_of"] == "2026-06-03"
+
+
+def test_artifact_omits_nulls(art):
+    entries = [d for v in art["days"].values() for d in v]
+    assert entries and all(v is not None for d in entries for v in d.values())

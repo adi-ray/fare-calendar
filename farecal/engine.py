@@ -134,7 +134,8 @@ class FareEngine:
         days = {}
         for route in self.routes:
             entries = [self.entry(route, self.today + timedelta(days=k)) for k in range(self.horizon)]
-            days[route] = [{k: e[k] for k in ("date", "fare", "low", "high", "source", "seen_at")}
+            # Nulls dropped to keep the file small (Render Secret Files cap at 1 MB).
+            days[route] = [{k: e[k] for k in ("date", "fare", "low", "high", "source", "seen_at") if e[k] is not None}
                            for e in entries if e["fare"] is not None]
         return {"version": 1, "as_of": self.today.isoformat(), "built_at": self.built_at,
                 "model": self.forecaster.name, "currency": self.currency, "days": days}

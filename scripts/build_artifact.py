@@ -44,6 +44,9 @@ if __name__ == "__main__":
     print(f"as of {art['as_of']} | {len(art['days'])} routes | {n_days} priced dates ({n_est} estimates, "
           f"{n_days - n_est} seen) | estimates on {len(eng.forecast_routes)} routes | {Path(a.out).stat().st_size/1024:.0f} KB -> {a.out}")
 
+    if Path(a.out).stat().st_size > 900 * 1024:
+        print("warning: over ~900 KB; too big for a Render Secret File (1 MB cap). Use a disk or --horizon 120.")
+
     if a.upload:
         token = os.environ.get("FARECAL_ADMIN_TOKEN")
         if not token:

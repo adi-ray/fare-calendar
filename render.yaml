@@ -19,19 +19,19 @@ services:
   - type: web
     name: fare-calendar
     runtime: python
-    plan: starter          # a persistent disk needs a paid instance; free works if you re-upload after each restart
+    plan: free
+    # Free plan: no disk, and the instance sleeps after 15 idle minutes, wiping uploads.
+    # Add the real forecasts as a Secret File named forecasts.json (dashboard > Environment);
+    # it survives restarts and is served whenever it's newer than the last upload.
+    # With credits: plan: starter, plus a disk (mountPath /var/data) and FARECAL_ARTIFACT=/var/data/forecasts.json.
     buildCommand: pip install -r requirements-api.txt
     startCommand: uvicorn farecal.api:app --host 0.0.0.0 --port $PORT
     healthCheckPath: /api/health
-    disk:
-      name: forecasts
-      mountPath: /var/data
-      sizeGB: 1
     envVars:
       - key: PYTHON_VERSION
         value: 3.12.7
-      - key: FARECAL_ARTIFACT
-        value: /var/data/forecasts.json
+      - key: FARECAL_ARTIFACT_SEED
+        value: /etc/secrets/forecasts.json
       - key: FARECAL_BASIC_USER
         sync: false        # set in the dashboard
       - key: FARECAL_BASIC_PASS
