@@ -1,0 +1,19 @@
+[project]
+name = "fare-calendar"
+version = "0.1.0"
+description = "Lowest-fare date picker for B2B flight booking, forecast by the open-weight Chronos-Bolt model from your own search logs."
+requires-python = ">=3.10"
+license = { text = "MIT" }
+dependencies = [
+  "chronos-forecasting>=1.5",
+  "fastapi>=0.110",
+  "uvicorn[standard]>=0.29",
+  "pandas>=2.1",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "httpx>=0.27"]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]

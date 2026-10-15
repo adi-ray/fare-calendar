@@ -1,0 +1,44 @@
+# Render Blueprint: two services from one repo.
+#   fare-calendar-demo  public, SYNTHETIC data committed in the repo, free plan.
+#   fare-calendar       private: real forecasts uploaded by the nightly job, behind a login.
+# Neither runs PyTorch: forecasts are built where the data lives (scripts/build_artifact.py).
+services:
+  - type: web
+    name: fare-calendar-demo
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements-api.txt
+    startCommand: uvicorn farecal.api:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /api/health
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.7
+      - key: FARECAL_ARTIFACT
+        value: data/forecasts.SYNTHETIC.json
+
+  - type: web
+    name: fare-calendar
+    runtime: python
+    plan: starter          # a persistent disk needs a paid instance; free works if you re-upload after each restart
+    buildCommand: pip install -r requirements-api.txt
+    startCommand: uvicorn farecal.api:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /api/health
+    disk:
+      name: forecasts
+      mountPath: /var/data
+      sizeGB: 1
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.7
+      - key: FARECAL_ARTIFACT
+        value: /var/data/forecasts.json
+      - key: FARECAL_BASIC_USER
+        sync: false        # set in the dashboard
+      - key: FARECAL_BASIC_PASS
+        sync: false
+      - key: FARECAL_API_KEY
+        generateValue: true
+      - key: FARECAL_ADMIN_TOKEN
+        generateValue: true
+      - key: FARECAL_CORS_ORIGINS
+        sync: false        # your booking portal's origin, e.g. https://portal.example.com

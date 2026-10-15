@@ -1,0 +1,138 @@
+"""Gemma writes the supplier mapping; plain code checks it.
+
+Gemma 4 runs locally through Ollama's OpenAI-compatible endpoint, so supplier
+responses (negotiated fares) never leave the machine. It sees a shrunken sample
+of one response and returns a spec in the language described in spec.py. The
+spec is then applied to several real responses and must pass hard checks; any
+failure goes back to Gemma as feedback. Gemma never touches fares at run time.
+"""
+from __future__ import annotations
+
+import json
+import os
+import urllib.request
+from dataclasses import dataclass
+
+from .spec import SpecError, check_spec, extract
+from .tree import compact
+
+BASE_URL = os.environ.get("GEMMA_BASE_URL", "http://localhost:11434/v1")
+MODEL = os.environ.get("GEMMA_MODEL", "gemma4")
+MAX_SAMPLE_CHARS = 14_000
+
+SYSTEM = """You map flight-supplier API responses to a fare table.
+Return ONLY a JSON object (a "spec") with keys: rows, fields, optional where, optional date_format.
+
+Path language:
+- "a.b.c" walks keys from the current row. "a[0]" takes an index. "a[*].b" takes the first non-empty.
+- rows: ONE path that contains [*] and lands on the objects that each carry ONE price (expand every list on the way with [*]).
+- "^.x" reads x from one [*] level above the row, "^^.x" two levels above. "$.a.b" reads from the document root.
+- "meta.origin", "meta.destination", "meta.departure_date" are the agent's search. Use them ONLY when the response itself does not contain that value for each row.
+- "=VALUE" is a constant. Constants are allowed ONLY for currency.
+- where: {"relative.path": "VALUE"} keeps rows whose value equals VALUE (e.g. passenger type "ADT").
+- date_format: a Python strptime format if dates are not ISO (e.g. "%d%m%y" for 031126).
+
+fields must include: fare, departure_date, origin, destination, and currency if the response states one.
+fare = the total price for ONE adult, taxes included (the price an agent would quote). Prefer a field named like total/totalFare/grand_total/price over base fare or tax.
+origin/destination must be 3-letter IATA airport codes.
+Never copy example values from the sample into the spec except currency constants."""
+
+EXAMPLE_SAMPLE = {"Reply": {"conversionRate": {"currency": "INR"}, "recommendation": [
+    {"paxFareProduct": [{"paxReference": {"ptc": "ADT"}, "detail": {"totalFareAmount": "21450", "totalTaxAmount": "4210"}},
+                        {"paxReference": {"ptc": "CH"}, "detail": {"totalFareAmount": "16800"}}]}, "… 41 more"]}}
+EXAMPLE_META = {"origin": "DEL", "destination": "DXB", "departure_date": "2026-11-03"}
+EXAMPLE_SPEC = {"rows": "Reply.recommendation[*].paxFareProduct[*]", "where": {"paxReference.ptc": "ADT"},
+                "fields": {"fare": "detail.totalFareAmount", "currency": "$.Reply.conversionRate.currency",
+                           "origin": "meta.origin", "destination": "meta.destination",
+                           "departure_date": "meta.departure_date"}}
+
+
+@dataclass
+class Sample:
+    doc: object
+    meta: dict
+    name: str
+
+
+def prompt_for(supplier: str, filename: str, sample: Sample) -> list[dict]:
+    shape = json.dumps(compact(sample.doc), ensure_ascii=False)
+    if len(shape) > MAX_SAMPLE_CHARS:
+        shape = json.dumps(compact(sample.doc, max_items=1, max_str=24), ensure_ascii=False)[:MAX_SAMPLE_CHARS] + " …(truncated)"
+    meta = {k: sample.meta.get(k) for k in ("origin", "destination", "departure_date")}
+    return [
+        {"role": "system", "content": SYSTEM},
+        {"role": "user", "content": f"Example response:\n{json.dumps(EXAMPLE_SAMPLE)}\nSearch: {json.dumps(EXAMPLE_META)}"},
+        {"role": "assistant", "content": json.dumps(EXAMPLE_SPEC)},
+        {"role": "user", "content": f"Supplier: {supplier}\nFile: {filename}\nSearch: {json.dumps(meta)}\nResponse:\n{shape}"},
+    ]
+
+
+def chat(messages: list[dict], model: str = MODEL, base_url: str = BASE_URL, timeout: int = 600) -> str:
+    body = json.dumps({"model": model, "messages": messages, "temperature": 0,
+                       "response_format": {"type": "json_object"}}).encode()
+    req = urllib.request.Request(f"{base_url.rstrip('/')}/chat/completions", data=body,
+                                 headers={"Content-Type": "application/json"})
+    with urllib.request.urlopen(req, timeout=timeout) as r:
+        return json.loads(r.read())["choices"][0]["message"]["content"]
+
+
+def validate(spec: dict, samples: list[Sample]) -> tuple[list[str], dict]:
+    """Hard checks against real responses. Returns (problems, stats)."""
+    try:
+        check_spec(spec)
+    except SpecError as e:
+        return [str(e)], {}
+    problems = []
+    for name, path in spec["fields"].items():
+        if path.startswith("=") and name != "currency":
+            problems.append(f"'{name}' must not be a constant")
+    if problems:
+        return problems, {}
+
+    with_rows = matched = 0
+    fares, multi_date = [], False
+    for s in samples:
+        try:
+            rows = extract(spec, s.doc, s.meta)
+        except SpecError as e:
+            return [str(e)], {}
+        if not rows:
+            continue
+        with_rows += 1
+        fares += [r["fare"] for r in rows]
+        dates = {r["departure_date"].isoformat() for r in rows}
+        multi_date |= len(dates) > 1
+        if any(r["origin"] == s.meta.get("origin") and r["destination"] == s.meta.get("destination") for r in rows):
+            matched += 1
+
+    stats = {"samples": len(samples), "samples_with_rows": with_rows, "rows": len(fares),
+             "searched_route_found": matched, "multi_date": multi_date}
+    if with_rows < max(1, round(0.6 * len(samples))):
+        problems.append(f"only {with_rows} of {len(samples)} responses produced rows; check 'rows' path, wildcards and 'where'")
+    if fares and not (50 <= min(fares) and max(fares) <= 2_000_000):
+        problems.append(f"fares range {min(fares):.0f}–{max(fares):.0f} looks wrong; 'fare' should be a total price, not an id or a count")
+    if with_rows and matched < round(0.5 * with_rows):
+        problems.append(f"the searched route appears in only {matched} of {with_rows} responses; origin/destination paths may be wrong or swapped")
+    return problems, stats
+
+
+def map_supplier(supplier: str, filename: str, samples: list[Sample], *, attempts: int = 3,
+                 model: str = MODEL, llm=chat, log=print) -> dict | None:
+    messages = prompt_for(supplier, filename, samples[0])
+    for n in range(1, attempts + 1):
+        raw = llm(messages, model=model)
+        try:
+            spec = json.loads(raw)
+        except json.JSONDecodeError:
+            problems, stats = ["reply was not valid JSON"], {}
+            spec = None
+        else:
+            problems, stats = validate(spec, samples)
+        log(f"  attempt {n}: {'OK' if not problems else '; '.join(problems)}  {stats or ''}")
+        if not problems:
+            return {"supplier": supplier, "files": [filename], **{k: spec[k] for k in ("rows", "where", "fields", "date_format") if k in spec},
+                    "generated_by": f"{model} (validated on {stats['samples_with_rows']}/{stats['samples']} responses)",
+                    "validation": stats}
+        messages = messages + [{"role": "assistant", "content": raw},
+                               {"role": "user", "content": "That spec failed validation: " + "; ".join(problems) + ". Return a corrected spec."}]
+    return None

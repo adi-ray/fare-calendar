@@ -1,0 +1,206 @@
+"""A tiny mapping language for pulling fares out of any supplier response.
+
+A spec is JSON:
+
+    {
+      "supplier": "examplefix",
+      "files": ["SEARCH_RS.json"],
+      "rows": "payload.sectors[*].dates[*]",
+      "where": {"cabin": "Y"},                 # optional equality filters (row-relative)
+      "fields": {
+        "fare": "price",
+        "departure_date": "date",
+        "origin": "^.origin",                  # ^ = one wildcard level up
+        "destination": "^.destination",
+        "currency": "=INR"                     # = constant
+      },
+      "date_format": "%d%m%y"                  # optional; otherwise common formats are tried
+    }
+
+Path forms: "a.b.c" (row-relative), "a[0].b" (index), "a[*].b" (first non-empty),
+"^.x" / "^^.x" (ancestor rows), "$.a.b" (document root), "meta.origin" (the
+agent's search: origin, destination, departure_date, searched_at), "=VALUE".
+"""
+from __future__ import annotations
+
+import re
+from datetime import date, datetime
+
+REQUIRED_FIELDS = ("fare", "departure_date", "origin", "destination")
+_SEG = re.compile(r"^([^\[\]]+)((?:\[(?:\*|\d+)\])*)$")
+_IDX = re.compile(r"\[(\*|\d+)\]")
+DATE_FORMATS = ("%Y-%m-%d", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%dT%H:%M", "%d%m%y", "%d-%m-%Y", "%d/%m/%Y",
+                "%d %b %Y", "%d-%b-%Y", "%d %B %Y", "%Y/%m/%d", "%d.%m.%Y", "%Y%m%d")
+
+
+class SpecError(ValueError):
+    pass
+
+
+def check_spec(spec: dict) -> None:
+    if not isinstance(spec, dict):
+        raise SpecError("spec must be a JSON object")
+    for k in ("rows", "fields"):
+        if k not in spec:
+            raise SpecError(f"spec is missing '{k}'")
+    if "[*]" not in spec["rows"]:
+        raise SpecError("'rows' must contain at least one [*] wildcard")
+    missing = [f for f in REQUIRED_FIELDS if f not in spec["fields"]]
+    if missing:
+        raise SpecError(f"'fields' is missing: {', '.join(missing)}")
+    for name, path in {**spec["fields"], **spec.get("where", {})}.items():
+        if not isinstance(path, str):
+            raise SpecError(f"path for '{name}' must be a string")
+
+
+def extract(spec: dict, doc, meta: dict | None = None) -> list[dict]:
+    """Apply a spec to one parsed response; return clean fare rows."""
+    check_spec(spec)
+    meta = meta or {}
+    out = []
+    for stack in _expand(doc, spec["rows"]):
+        if not _matches(spec.get("where", {}), stack, doc, meta):
+            continue
+        row = {k: _resolve(p, stack, doc, meta) for k, p in spec["fields"].items()}
+        fare = parse_fare(row.get("fare"))
+        dep = parse_date(row.get("departure_date"), spec.get("date_format"))
+        o, d = _code(row.get("origin")), _code(row.get("destination"))
+        if fare is None or dep is None or not o or not d:
+            continue
+        cur = row.get("currency")
+        out.append({"origin": o, "destination": d, "departure_date": dep, "fare": fare,
+                    "currency": str(cur).strip().upper() if cur else None})
+    return out
+
+
+# ---- paths ---------------------------------------------------------------
+def _expand(doc, path: str) -> list[list]:
+    """Walk 'a.b[*].c[*]'. Each result is the stack of elements at every wildcard level."""
+    states = [(doc, [doc])]
+    for seg in _split(path):
+        key, idxs = seg
+        nxt = []
+        for node, stack in states:
+            child = _get(node, key)
+            pending = [(child, stack)]
+            for i in idxs:
+                expanded = []
+                for c, st in pending:
+                    if i == "*":
+                        expanded += [(x, st + [x]) for x in _as_list(c)]
+                    else:
+                        lst = _as_list(c)
+                        expanded += [(lst[int(i)], st)] if int(i) < len(lst) else []
+                pending = expanded
+            nxt += [(c, st) for c, st in pending if c is not None]
+        states = nxt
+    return [stack for _node, stack in states]
+
+
+def _resolve(path: str, stack: list, doc, meta: dict):
+    if path.startswith("="):
+        return path[1:]
+    if path.startswith("meta."):
+        return meta.get(path[5:])
+    if path.startswith("$."):
+        node, path = doc, path[2:]
+    else:
+        up = len(path) - len(path.lstrip("^"))
+        path = path[up:].lstrip(".")
+        if up >= len(stack):
+            return None
+        node = stack[-1 - up]
+    if not path:
+        return _leaf(node)
+    for key, idxs in _split(path):
+        node = _get(node, key)
+        for i in idxs:
+            lst = _as_list(node)
+            if i == "*":
+                node = next((x for x in lst if x not in (None, "", {}, [])), None)
+            else:
+                node = lst[int(i)] if int(i) < len(lst) else None
+        if node is None:
+            return None
+    return _leaf(node)
+
+
+def _matches(where: dict, stack, doc, meta) -> bool:
+    for path, want in where.items():
+        got = _resolve(path, stack, doc, meta)
+        wants = want if isinstance(want, list) else [want]
+        if str(got).strip().upper() not in {str(w).strip().upper() for w in wants}:
+            return False
+    return True
+
+
+def _split(path: str):
+    segs = []
+    for raw in path.split("."):
+        m = _SEG.match(raw.strip())
+        if not m:
+            raise SpecError(f"bad path segment '{raw}' in '{path}'")
+        segs.append((m.group(1), _IDX.findall(m.group(2))))
+    return segs
+
+
+def _get(node, key):
+    if isinstance(node, dict):
+        return node.get(key)
+    if isinstance(node, list) and node and isinstance(node[0], dict):
+        return node[0].get(key)  # tolerate a list where a single object was expected
+    return None
+
+
+def _as_list(x):
+    if x is None:
+        return []
+    return x if isinstance(x, list) else [x]
+
+
+def _leaf(node):
+    if isinstance(node, dict):
+        return node.get("#text")
+    if isinstance(node, list):
+        return _leaf(node[0]) if node else None
+    return node
+
+
+# ---- values --------------------------------------------------------------
+def parse_fare(v) -> float | None:
+    if isinstance(v, bool) or v is None:
+        return None
+    if isinstance(v, (int, float)):
+        x = float(v)
+    else:
+        m = re.search(r"-?\d[\d,]*(?:\.\d+)?", str(v))
+        if not m:
+            return None
+        x = float(m.group(0).replace(",", ""))
+    return x if x > 0 else None
+
+
+def parse_date(v, fmt: str | None = None) -> date | None:
+    if v is None or v == "":
+        return None
+    if isinstance(v, (int, float)) and not isinstance(v, bool) and v > 1e9:  # epoch seconds / ms
+        return datetime.fromtimestamp(v / 1000 if v > 1e11 else v).date()
+    s = str(v).strip()
+    for f in ([fmt] if fmt else []) + list(DATE_FORMATS):
+        try:
+            return datetime.strptime(s[: _fmt_len(f, s)], f).date()
+        except ValueError:
+            continue
+    return None
+
+
+def _fmt_len(fmt: str, s: str) -> int:
+    # Allow trailing time/zone on ISO-like strings ("2026-11-03T06:10:00+05:30").
+    return 10 if fmt == "%Y-%m-%d" and len(s) > 10 and s[10] in "T " else len(s)
+
+
+def _code(v) -> str | None:
+    if v is None:
+        return None
+    s = str(v).strip().upper()
+    return s if re.fullmatch(r"[A-Z]{3}", s) else None

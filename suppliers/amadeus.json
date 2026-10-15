@@ -1,0 +1,14 @@
+{
+  "supplier": "amadeus",
+  "files": ["SEARCH_RS.xml"],
+  "rows": "Envelope.Body.Fare_MasterPricerTravelBoardSearchReply.recommendation[*].paxFareProduct[*]",
+  "where": {"paxReference.ptc": "ADT"},
+  "fields": {
+    "fare": "paxFareDetail.totalFareAmount",
+    "currency": "$.Envelope.Body.Fare_MasterPricerTravelBoardSearchReply.conversionRate.conversionRateDetail.currency",
+    "origin": "meta.origin",
+    "destination": "meta.destination",
+    "departure_date": "meta.departure_date"
+  },
+  "generated_by": "hand-written (Amadeus Fare_MasterPricerTravelBoardSearch, public format)"
+}

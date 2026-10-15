@@ -1,0 +1,15 @@
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.env
+
+# Real data never leaves your machine: exports, observations and real forecasts.
+data/*
+!data/sample_search_logs.SYNTHETIC.csv
+!data/forecasts.SYNTHETIC.json
+
+# Supplier mappings describe private supplier APIs; only the public Amadeus one and examples are shared.
+suppliers/*
+!suppliers/amadeus.json
+!suppliers/examples/
