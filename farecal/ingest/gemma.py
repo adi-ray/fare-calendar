@@ -20,7 +20,10 @@ BASE_URL = os.environ.get("GEMMA_BASE_URL", "http://localhost:11434/v1")
 MODEL = os.environ.get("GEMMA_MODEL", "gemma4")
 # Ollama's default context (~4k tokens) silently drops the start of a long prompt,
 # which is where the instructions live. The native API lets us raise it.
-NUM_CTX = int(os.environ.get("GEMMA_NUM_CTX", "16384"))
+NUM_CTX = int(os.environ.get("GEMMA_NUM_CTX", "12288"))
+# Gemma 4's thinking mode is on by default in Ollama. On a 4 GB laptop GPU it turned a
+# 5-second answer into a minute of reasoning tokens, and the answers weren't better.
+THINK = os.environ.get("GEMMA_THINK", "false").lower() == "true"
 MAX_SAMPLE_CHARS = 20_000
 
 SYSTEM = """You map flight-supplier API responses to a fare table.
@@ -82,8 +85,8 @@ def chat(messages: list[dict], model: str = MODEL, base_url: str = BASE_URL, tim
     """Ollama's native API (bigger context, JSON mode); any other OpenAI-compatible server otherwise."""
     if ":11434" in base_url or os.environ.get("GEMMA_API") == "ollama":
         root = base_url.rstrip("/").removesuffix("/v1")
-        body = {"model": model, "messages": messages, "stream": False, "format": "json",
-                "options": {"temperature": 0, "num_ctx": NUM_CTX}}
+        body = {"model": model, "messages": messages, "stream": False, "format": "json", "think": THINK,
+                "options": {"temperature": 0, "num_ctx": NUM_CTX, "num_predict": 700}}
         url, pick = f"{root}/api/chat", lambda r: r["message"]["content"]
     else:
         body = {"model": model, "messages": messages, "temperature": 0, "response_format": {"type": "json_object"}}
