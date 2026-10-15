@@ -13,3 +13,6 @@ data/*
 suppliers/*
 !suppliers/amadeus.json
 !suppliers/examples/
+
+# Talks to the private booking backend's internals; kept local.
+scripts/scan_direct.py
