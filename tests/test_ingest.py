@@ -210,3 +210,31 @@ def test_feedback_names_the_fix_when_a_level_is_repeated():
     assert "use 'publishedFare'" in msg
     spec["fields"]["fare"] = "^.fares[*].passengerFares[*].publishedFare"
     assert "use '^.passengerFares[*].publishedFare'" in " ".join(explain_fields(spec, doc, META))
+
+
+def test_root_written_field_path_is_rewritten_with_ancestors():
+    from farecal.ingest.spec import _ancestor_rewrite, explain_fields
+    rows = "data.routes[*].byDate.options[*].groups[*].fares[*]"
+    assert _ancestor_rewrite("data.routes[*].byDate.options[*].segment.from", rows) == "^^.segment.from"
+    assert _ancestor_rewrite("data.routes[*].code", rows) == "^^^.code"
+    assert _ancestor_rewrite("price.total", rows) is None
+    doc = {"data": {"routes": [{"byDate": {"options": [{"segment": {"from": "DEL"},
+           "groups": [{"fares": [{"price": 4100}]}]}]}}]}}
+    spec = {"rows": rows, "fields": {"fare": "price", "origin": "data.routes[*].byDate.options[*].segment.from",
+            "destination": "meta.destination", "departure_date": "meta.departure_date"}}
+    msg = " ".join(explain_fields(spec, doc, META))
+    assert "use '^^.segment.from'" in msg
+    spec["fields"]["origin"] = "^^.segment.from"
+    assert extract(spec, doc, META)[0]["origin"] == "DEL"
+
+
+def test_repeated_spec_is_called_out():
+    calls = []
+    bad = json.dumps({**FIXED_SPEC, "rows": "payload.sector[*].dates[*]"})
+
+    def fake_llm(messages, model):
+        calls.append(messages)
+        return bad
+
+    gemma.map_supplier("x", "f.json", _samples(), llm=fake_llm, attempts=3, log=lambda *_: None)
+    assert "SAME spec" not in calls[1][-1]["content"] and "SAME spec" in calls[2][-1]["content"]

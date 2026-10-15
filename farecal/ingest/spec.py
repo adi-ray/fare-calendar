@@ -105,6 +105,11 @@ def explain_fields(spec: dict, doc, meta: dict | None = None) -> list[str]:
     for name, path in spec["fields"].items():
         if not any(_resolve(path, s, doc, meta or {}) not in (None, "") for s in stacks):
             where = _explain_field(path, stacks[0], doc)
+            rewrite = _ancestor_rewrite(path, spec["rows"])
+            if rewrite:
+                where = (where + " — " if where else "") + (
+                    f"this path repeats the 'rows' path from the top; field paths start at the row, "
+                    f"so reach that ancestor with '^': use '{rewrite}'")
             out.append(f"field '{name}' path '{path}' is empty on every row" + (f": {where}" if where else ""))
     if out:
         row = stacks[0][-1]
@@ -114,6 +119,26 @@ def explain_fields(spec: dict, doc, meta: dict | None = None) -> list[str]:
         if isinstance(parent, dict):
             out.append(f"one level up (^.) has keys {sorted(parent)[:25]}")
     return out
+
+
+def _ancestor_rewrite(field_path: str, rows_path: str) -> str | None:
+    """A field path written from the document root that shares a prefix with 'rows' can be
+    expressed exactly as '^…' from the row: one '^' per wildcard level after the shared part."""
+    if field_path.startswith(("^", "$.", "=", "meta.")):
+        return None
+    try:
+        r, f = _split(rows_path), _split(field_path)
+    except SpecError:
+        return None
+    shared = 0
+    while shared < min(len(r), len(f)) and r[shared] == f[shared]:
+        shared += 1
+    if shared == 0 or shared == len(f):
+        return None
+    wild = lambda segs: sum(1 for _k, ix in segs for i in ix if i in ("*", "~"))  # noqa: E731
+    ups = wild(r) - wild(r[:shared])
+    tail = ".".join(k + "".join(_fmt(i) for i in ix) for k, ix in f[shared:])
+    return ("^" * ups + "." + tail) if ups else tail
 
 
 def _explain_field(path: str, stack: list, doc) -> str | None:

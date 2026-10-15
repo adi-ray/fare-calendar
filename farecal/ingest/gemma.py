@@ -166,6 +166,7 @@ def validate(spec: dict, samples: list[Sample]) -> tuple[list[str], dict]:
 def map_supplier(supplier: str, filename: str, samples: list[Sample], *, attempts: int = 3,
                  model: str = MODEL, llm=chat, log=print) -> dict | None:
     messages = prompt_for(supplier, filename, samples[0])
+    last = None
     for n in range(1, attempts + 1):
         raw = llm(messages, model=model)
         try:
@@ -182,6 +183,10 @@ def map_supplier(supplier: str, filename: str, samples: list[Sample], *, attempt
             return {"supplier": supplier, "files": [filename], **{k: spec[k] for k in ("rows", "where", "fields", "date_format") if k in spec},
                     "generated_by": f"{model} (validated on {stats['samples_with_rows']}/{stats['samples']} responses)",
                     "validation": stats}
+        repeat = spec is not None and spec == last
+        last = spec
+        note = (" You returned the SAME spec as before; it fails for the same reason. Change it, "
+                "applying any 'use ...' suggestion above verbatim.") if repeat else ""
         messages = messages + [{"role": "assistant", "content": raw},
-                               {"role": "user", "content": "That spec failed validation: " + "; ".join(problems) + ". Return a corrected spec."}]
+                               {"role": "user", "content": "That spec failed validation: " + "; ".join(problems) + "." + note + " Return a corrected spec."}]
     return None
