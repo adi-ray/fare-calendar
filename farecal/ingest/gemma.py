@@ -13,7 +13,7 @@ import os
 import urllib.request
 from dataclasses import dataclass
 
-from .spec import SpecError, check_spec, explain_fields, explain_rows, extract
+from .spec import SpecError, check_spec, explain_fields, explain_rows, extract, lint_rows, total_hint
 from .tree import compact
 
 BASE_URL = os.environ.get("GEMMA_BASE_URL", "http://localhost:11434/v1")
@@ -30,7 +30,8 @@ SYSTEM = """You map flight-supplier API responses to a fare table.
 Return ONLY a JSON object (a "spec") with keys: rows, fields, optional where, optional date_format.
 
 Path language:
-- "a.b.c" walks keys from the current row. "a[0]" takes an index. "a[*].b" takes the first non-empty.
+- "a.b.c" walks keys from the current row. "a[0]" takes an index, "a[-1]" the last item. "a[*].b" takes the first non-empty.
+- A list of lists needs one wildcard per level: "groups[*][*].offers[*]".
 - "{*}" walks the VALUES of an object whose keys are ids/codes (e.g. {"0~AB~X1": {...}, "0~AB~X2": {...}}): "faresAvailable{*}".
 - rows: ONE path that contains [*] or {*} and lands on the objects that each carry ONE price (expand every list on the way with [*]).
 - "^.x" reads x from one [*] level above the row, "^^.x" two levels above. "$.a.b" reads from the document root.
@@ -138,6 +139,9 @@ def validate(spec: dict, samples: list[Sample]) -> tuple[list[str], dict]:
 
     stats = {"samples": len(samples), "samples_with_rows": with_rows, "rows": len(fares),
              "searched_route_found": matched, "multi_date": multi_date}
+    lint = lint_rows(samples[0].doc, spec["rows"])
+    if lint:
+        problems.append(f"'rows' path: {lint}")
     if with_rows < max(1, round(0.6 * len(samples))):
         problems.append(f"only {with_rows} of {len(samples)} responses produced rows")
         # Say exactly where it breaks, so the retry has something to work with.
@@ -158,6 +162,10 @@ def validate(spec: dict, samples: list[Sample]) -> tuple[list[str], dict]:
             hint = ("values look like ids, counts or minor units (paise/cents)" if median < 100 or median > 1_000_000
                     else "some rows may be in another currency (map 'currency' per row) or be a multi-passenger total")
             problems.append(f"{odd:.0%} of fares are outside 50–2,000,000 (median {median:.0f}, max {srt[-1]:.0f}); {hint}")
+    if fares:
+        hint = total_hint(spec, samples[0].doc, samples[0].meta)
+        if hint:
+            problems.append(hint)
     if with_rows and matched < round(0.5 * with_rows):
         problems.append(f"the searched route appears in only {matched} of {with_rows} responses; origin/destination paths may be wrong or swapped")
     return problems, stats

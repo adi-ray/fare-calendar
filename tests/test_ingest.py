@@ -238,3 +238,39 @@ def test_repeated_spec_is_called_out():
 
     gemma.map_supplier("x", "f.json", _samples(), llm=fake_llm, attempts=3, log=lambda *_: None)
     assert "SAME spec" not in calls[1][-1]["content"] and "SAME spec" in calls[2][-1]["content"]
+
+
+def test_negative_index_and_nested_list_lint():
+    from farecal.ingest.spec import lint_rows
+    doc = {"brands": [[{"part": {"segs": [{"o": "DEL", "d": "BOM"}, {"o": "BOM", "d": "DXB"}]},
+                        "offers": [{"p": [{"t": "ADT", "total": {"amount": 21000}, "fare": {"amount": 17000}}]}]},
+                       {"part": {"segs": [{"o": "DEL", "d": "DXB"}]},
+                        "offers": [{"p": [{"t": "ADT", "total": {"amount": 19000}, "fare": {"amount": 15500}}]}]}]]}
+    assert "use 'brands[*][*]'" in lint_rows(doc, "brands[*].offers[*].p[*]")
+    assert lint_rows(doc, "brands[*][*].offers[*].p[*]") is None
+    spec = {"rows": "brands[*][*].offers[*].p[*]", "where": {"t": "ADT"},
+            "fields": {"fare": "total.amount", "origin": "^^.part.segs[0].o", "destination": "^^.part.segs[-1].d",
+                       "departure_date": "meta.departure_date"}}
+    rows = extract(spec, doc, META)
+    assert [(r["origin"], r["destination"], r["fare"]) for r in rows] == [("DEL", "DXB", 21000.0), ("DEL", "DXB", 19000.0)]
+
+
+def test_base_fare_is_flagged_when_a_total_exists():
+    from farecal.ingest.spec import total_hint
+    doc = {"rows": [{"fare": {"amount": 15500}, "total": {"amount": 19000}, "totalWithoutDiscount": {"amount": 25000}}] * 3}
+    spec = {"rows": "rows[*]", "fields": {"fare": "fare.amount", "origin": "meta.origin",
+            "destination": "meta.destination", "departure_date": "meta.departure_date"}}
+    hint = total_hint(spec, doc, META)
+    assert hint and "use 'total.amount'" in hint and "19000" in hint     # not the pre-discount figure
+    spec["fields"]["fare"] = "total.amount"
+    assert total_hint(spec, doc, META) is None
+
+
+def test_booking_level_totals_do_not_trigger_the_base_fare_check():
+    from farecal.ingest.spec import total_hint
+    # Navitaire-style: per-passenger fareAmount already includes taxes; 'totals' sums all passengers.
+    doc = {"faresAvailable": {"k1": {"totals": {"revenueTotal": 10080, "fareTotal": 13058},
+                                     "fares": [{"passengerFares": [{"fareAmount": 6529, "publishedFare": 5040}]}]}}}
+    spec = {"rows": "faresAvailable{*}", "fields": {"fare": "fares[*].passengerFares[*].fareAmount",
+            "origin": "meta.origin", "destination": "meta.destination", "departure_date": "meta.departure_date"}}
+    assert total_hint(spec, doc, META) is None
