@@ -5,6 +5,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [1.0.1] - 2026-10-17
+
+### Changed
+
+- The demo can be redeployed on demand: **Actions → CI → Run workflow** on `main` now runs the deploy job too, not just the checks.
+- Deploys are driven by GitHub Actions through Render deploy hooks. Production releases wait for a maintainer's approval in the `production` environment.
+
 ## [1.0.0] - 2026-10-17
 
 First public release, in production with a travel agency's B2B booking portal.
@@ -41,5 +48,6 @@ First public release, in production with a travel agency's B2B booking portal.
 - **Docker image.** Non-root, with a health check.
 - **`/api/health`** reports the version, the deployed commit and the forecast date.
 
-[Unreleased]: https://github.com/adi-ray/fare-calendar/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/adi-ray/fare-calendar/compare/v1.0.1...HEAD
+[1.0.1]: https://github.com/adi-ray/fare-calendar/compare/v1.0.0...v1.0.1
 [1.0.0]: https://github.com/adi-ray/fare-calendar/releases/tag/v1.0.0

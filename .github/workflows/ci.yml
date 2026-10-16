@@ -60,7 +60,8 @@ jobs:
 
   deploy-demo:
     name: Deploy demo
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    # Push to main deploys automatically; "Run workflow" on main redeploys on demand.
+    if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main'
     needs: [test, widget, docker]
     runs-on: ubuntu-latest
     environment:
