@@ -19,17 +19,21 @@ services:
   - type: web
     name: fare-calendar
     runtime: python
-    plan: free
-    # Free plan: no disk, and the instance sleeps after 15 idle minutes, wiping uploads.
-    # Add the real forecasts as a Secret File named forecasts.json (dashboard > Environment);
-    # it survives restarts and is served whenever it's newer than the last upload.
-    # With credits: plan: starter, plus a disk (mountPath /var/data) and FARECAL_ARTIFACT=/var/data/forecasts.json.
+    plan: starter          # always on (no cold starts for agents); covered by the Render credit
+    # Uploads from the nightly job (build_artifact.py --upload) land on the disk and survive
+    # restarts. The Secret File forecasts.json stays as a fallback; the newer of the two is served.
     buildCommand: pip install -r requirements-api.txt
     startCommand: uvicorn farecal.api:app --host 0.0.0.0 --port $PORT
     healthCheckPath: /api/health
+    disk:
+      name: forecasts
+      mountPath: /var/data
+      sizeGB: 1
     envVars:
       - key: PYTHON_VERSION
         value: 3.12.7
+      - key: FARECAL_ARTIFACT
+        value: /var/data/forecasts.json
       - key: FARECAL_ARTIFACT_SEED
         value: /etc/secrets/forecasts.json
       - key: FARECAL_BASIC_USER

@@ -33,7 +33,8 @@ MODE = os.environ.get("FARECAL_MODE", "artifact").lower()
 ARTIFACT = Path(os.environ.get("FARECAL_ARTIFACT", ROOT / "data" / "forecasts.json"))
 # Read-only fallback that survives restarts, e.g. a Render Secret File at /etc/secrets/forecasts.json.
 # Whichever of ARTIFACT / SEED is newer (by as_of, then built_at) is served.
-SEED = Path(os.environ["FARECAL_ARTIFACT_SEED"]) if os.environ.get("FARECAL_ARTIFACT_SEED") else None
+# Render puts a Secret File both at /etc/secrets/<name> and in the app's root folder.
+SEEDS = [Path(x) for x in (os.environ.get("FARECAL_ARTIFACT_SEED"), "/etc/secrets/forecasts.json") if x] + [ROOT / "forecasts.json"]
 DATA = Path(os.environ.get("FARECAL_DATA", ROOT / "data" / "sample_search_logs.SYNTHETIC.csv"))
 BASIC_USER = os.environ.get("FARECAL_BASIC_USER", "")
 BASIC_PASS = os.environ.get("FARECAL_BASIC_PASS", "")
@@ -81,7 +82,7 @@ async def require_login(request: Request, call_next):
 def artifact() -> dict:
     with _lock:
         if "artifact" not in _state:
-            found = [json.loads(p.read_text(encoding="utf-8")) for p in (ARTIFACT, SEED) if p and p.exists()]
+            found = [json.loads(p.read_text(encoding="utf-8")) for p in [ARTIFACT, *SEEDS] if p.is_file()]
             if not found:
                 raise HTTPException(503, "No forecasts loaded yet. Upload one or run scripts/build_artifact.py")
             _state["artifact"] = max(found, key=lambda a: (a["as_of"], a.get("built_at", "")))

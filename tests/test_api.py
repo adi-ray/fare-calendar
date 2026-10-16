@@ -92,7 +92,8 @@ def test_seed_file_used_when_upload_is_gone_and_newer_wins(tmp_path, monkeypatch
     seed = tmp_path / "seed.json"
     seed.write_text(json.dumps({**art, "as_of": "2026-06-03"}))
     monkeypatch.setenv("FARECAL_ARTIFACT_SEED", str(seed))
-    c, path = client(tmp_path, monkeypatch, art)           # uploaded copy as_of 2026-06-01
+    c, path = client(tmp_path, monkeypatch, art)
+    assert any(str(s) == str(seed) for s in __import__("farecal.api", fromlist=["SEEDS"]).SEEDS)           # uploaded copy as_of 2026-06-01
     assert c.get("/api/health").json()["as_of"] == "2026-06-03"   # seed is newer
     path.unlink()                                            # free-tier restart wiped the upload
     import farecal.api as api
