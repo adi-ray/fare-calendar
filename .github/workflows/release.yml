@@ -47,7 +47,7 @@ jobs:
             grab {print}
           ' CHANGELOG.md > RELEASE_NOTES.md
           [ -s RELEASE_NOTES.md ] || { echo "::error::no CHANGELOG.md section for $version"; exit 1; }
-      - uses: softprops/action-gh-release@v2
+      - uses: softprops/action-gh-release@v3
         with:
           name: Fare Calendar ${{ github.ref_name }}
           body_path: RELEASE_NOTES.md
