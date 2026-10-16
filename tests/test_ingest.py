@@ -274,3 +274,26 @@ def test_booking_level_totals_do_not_trigger_the_base_fare_check():
     spec = {"rows": "faresAvailable{*}", "fields": {"fare": "fares[*].passengerFares[*].fareAmount",
             "origin": "meta.origin", "destination": "meta.destination", "departure_date": "meta.departure_date"}}
     assert total_hint(spec, doc, META) is None
+
+
+def test_root_list_slash_alias_and_sum_of_charges():
+    doc = [{"Seg": {"Dep": "DEL", "Arr": "BOM", "STD": "2026-11-03T06:10:00"},
+            "PaxFare": [{"PaxType": "ADT", "Charges": {"Charge": [{"Amount": "5200"}, {"Amount": "1150.50"}, {"Amount": "-200"}]}},
+                        {"PaxType": "CHD", "Charges": {"Charge": [{"Amount": "4000"}]}}]}]
+    spec = {"rows": "$.[*].PaxFare[*]", "where": {"PaxType": "ADT"},
+            "fields": {"fare": "sum:Charges/Charge[*]/Amount", "origin": "^.Seg/Dep", "destination": "^.Seg.Arr",
+                       "departure_date": "^.Seg.STD"}}
+    rows = extract(spec, doc, META)
+    assert [(r["origin"], r["destination"], r["fare"]) for r in rows] == [("DEL", "BOM", 6150.5)]
+    assert extract({**spec, "rows": "[*].PaxFare[*]"}, doc, META) == rows
+
+
+def test_missing_key_suggestions():
+    from farecal.ingest.spec import explain_fields
+    doc = {"offers": [{"TotalPrice": {"Amount": 9100}, "Fares": {"Fare": [{"PaxFares": {"PaxFare": [{"ServiceCharges": {"x": 1}}]}}]}}]}
+    spec = {"rows": "offers[*]", "fields": {"fare": "Price.Amount", "origin": "meta.origin",
+            "destination": "meta.destination", "departure_date": "meta.departure_date"}}
+    assert "did you mean 'TotalPrice'?" in " ".join(explain_fields(spec, doc, META))
+    spec["fields"]["fare"] = "sum:ServiceCharges.x"
+    msg = " ".join(explain_fields(spec, doc, META))
+    assert "exists further down at 'Fares.Fare[*].PaxFares.PaxFare[*].ServiceCharges'" in msg

@@ -20,15 +20,18 @@ A spec is JSON:
 Path forms: "a.b.c" (row-relative), "a[0].b" (index), "a[*].b" (first non-empty),
 "a{*}.b" (values of an object keyed by ids; in 'rows' it walks every value),
 "^.x" / "^^.x" (ancestor rows), "$.a.b" (document root), "meta.origin" (the
-agent's search: origin, destination, departure_date, searched_at), "=VALUE".
+agent's search: origin, destination, departure_date, searched_at), "=VALUE",
+"sum:a[*].amount" (adds every match: for fares split into charges), "[*]" alone at the
+start when the response itself is a list. "/" is accepted as a separator (XPath habit).
 """
 from __future__ import annotations
 
+import difflib
 import re
 from datetime import date, datetime
 
 REQUIRED_FIELDS = ("fare", "departure_date", "origin", "destination")
-_SEG = re.compile(r"^([^\[\]{}]+)((?:\[(?:\*|-?\d+)\]|\{\*\})*)$")
+_SEG = re.compile(r"^([^\[\]{}]*)((?:\[(?:\*|-?\d+)\]|\{\*\})*)$")
 _TOK = re.compile(r"\[(\*|-?\d+)\]|(\{\*\})")  # [*] list items, [n] / [-1] index, {*} object values
 DATE_FORMATS = ("%Y-%m-%d", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%dT%H:%M", "%d%m%y", "%d-%m-%Y", "%d/%m/%Y",
                 "%d %b %Y", "%d-%b-%Y", "%d %B %Y", "%Y/%m/%d", "%d.%m.%Y", "%Y%m%d")
@@ -164,7 +167,8 @@ def explain_rows(doc, path: str) -> str | None:
             keys = sorted({k for n in states if isinstance(n, dict) for k in n} |
                           {k for n in states if isinstance(n, list) for x in n if isinstance(x, dict) for k in x})
             at = ".".join(walked) or "(document root)"
-            return f"'{key}' does not exist under {at}; keys there: {keys[:25]}"
+            hint = _suggest(key, states[0]) if states else ""
+            return f"'{key}' does not exist under {at}; keys there: {keys[:25]}.{hint}"
         walked.append(key + "".join(_fmt(i) for i in idxs))
         states = nxt
     return None
@@ -198,6 +202,8 @@ def explain_fields(spec: dict, doc, meta: dict | None = None) -> list[str]:
 def _ancestor_rewrite(field_path: str, rows_path: str) -> str | None:
     """A field path written from the document root that shares a prefix with 'rows' can be
     expressed exactly as '^…' from the row: one '^' per wildcard level after the shared part."""
+    prefix = "sum:" if field_path.startswith("sum:") else ""
+    field_path = field_path[len(prefix):]
     if field_path.startswith(("^", "$.", "=", "meta.")):
         return None
     try:
@@ -212,11 +218,12 @@ def _ancestor_rewrite(field_path: str, rows_path: str) -> str | None:
     wild = lambda segs: sum(1 for _k, ix in segs for i in ix if i in ("*", "~"))  # noqa: E731
     ups = wild(r) - wild(r[:shared])
     tail = ".".join(k + "".join(_fmt(i) for i in ix) for k, ix in f[shared:])
-    return ("^" * ups + "." + tail) if ups else tail
+    return prefix + (("^" * ups + "." + tail) if ups else tail)
 
 
 def _explain_field(path: str, stack: list, doc) -> str | None:
     """Walk a field path from its starting node and say which key is missing, and what's there instead."""
+    path = path[4:] if path.startswith("sum:") else path
     if path.startswith(("=", "meta.")):
         return None
     if path.startswith("$."):
@@ -243,7 +250,7 @@ def _explain_field(path: str, stack: list, doc) -> str | None:
                 tail = ".".join(k + "".join(_fmt(i) for i in ix) for k, ix in segs[later:])
                 fix = (f" — but '{segs[later][0]}' IS here: paths continue from where you already are, "
                        f"so use '{prefix}{done + '.' if done else ''}{tail}'")
-            return f"'{key}' missing at {at}; keys there: {keys[:20]}{fix}"
+            return f"'{key}' missing at {at}; keys there: {keys[:20]}{fix or '.' + _suggest(key, node)}"
         for i in idxs:
             lst = _children(child, i) if i in ("*", "~") else _as_list(child)
             child = next((x for x in lst if x not in (None, "", {}, [])), None) if i in ("*", "~") else _at(lst, i)
@@ -261,6 +268,7 @@ def _explain_field(path: str, stack: list, doc) -> str | None:
 def _expand(doc, path: str) -> list[list]:
     """Walk 'a.b[*].c[*]'. Each result is the stack of elements at every wildcard level."""
     states = [(doc, [doc])]
+    path = path[2:] if path.startswith("$.") else path
     for seg in _split(path):
         key, idxs = seg
         nxt = []
@@ -301,7 +309,71 @@ def _walk(path: str, stack: list, doc):
     return node
 
 
+def _all(path: str, stack: list, doc) -> list:
+    """Every value a path reaches, expanding all wildcards (for sum:)."""
+    if path.startswith("$."):
+        nodes, path = [doc], path[2:]
+    else:
+        up = len(path) - len(path.lstrip("^"))
+        path = path[up:].lstrip(".")
+        if up >= len(stack):
+            return []
+        nodes = [stack[-1 - up]]
+    for key, idxs in (_split(path) if path else []):
+        nodes = [_get(n, key) for n in nodes]
+        for i in idxs:
+            nodes = [x for n in nodes for x in (_children(n, i) if i in ("*", "~")
+                     else ([_at(_as_list(n), i)] if _at(_as_list(n), i) is not None else []))]
+        nodes = [n for n in nodes if n is not None]
+    return [_leaf(n) for n in nodes]
+
+
+def _number(v) -> float | None:
+    """Signed number (charges can be negative discounts)."""
+    if isinstance(v, bool) or v is None:
+        return None
+    if isinstance(v, (int, float)):
+        return float(v)
+    m = re.search(r"-?\d[\d,]*(?:\.\d+)?", str(v))
+    return float(m.group(0).replace(",", "")) if m else None
+
+
+def _suggest(key: str, node, max_depth: int = 7) -> str:
+    """'did you mean' for a near-miss key, and where the exact key lives further down."""
+    keys = sorted(node) if isinstance(node, dict) else sorted({k for x in _as_list(node) if isinstance(x, dict) for k in x})
+    out = []
+    close = difflib.get_close_matches(key, keys, n=1, cutoff=0.5)
+    if close:
+        out.append(f"did you mean '{close[0]}'?")
+    below = _find_below(node, key, max_depth)
+    if below:
+        out.append(f"'{key}' exists further down at '{below}'")
+    return (" " + " ".join(out)) if out else ""
+
+
+def _find_below(node, key: str, max_depth: int):
+    """Shortest path from node to a key named `key`, with [*] for lists (breadth-first)."""
+    frontier = [(node, "")]
+    for _ in range(max_depth):
+        nxt = []
+        for n, path in frontier:
+            items = [(x, "[*]") for x in n[:3]] if isinstance(n, list) else [(n, "")]
+            for item, suffix in items:
+                if not isinstance(item, dict):
+                    continue
+                base = path + suffix
+                if key in item:
+                    return (base + "." if base else "") + key
+                nxt += [(v, (base + "." if base else "") + k) for k, v in item.items() if isinstance(v, (dict, list))]
+        frontier = nxt[:400]
+    return None
+
+
 def _resolve(path: str, stack: list, doc, meta: dict):
+    if path.startswith("sum:"):
+        vals = [_number(v) for v in _all(path[4:], stack, doc)]
+        vals = [v for v in vals if v is not None]
+        return sum(vals) if vals else None
     if path.startswith("="):
         return path[1:]
     if path.startswith("meta."):
@@ -340,15 +412,17 @@ def _matches(where: dict, stack, doc, meta) -> bool:
 
 def _split(path: str):
     segs = []
-    for raw in path.split("."):
+    for raw in path.replace("/", ".").split("."):
         m = _SEG.match(raw.strip())
-        if not m:
+        if not m or not (m.group(1) or m.group(2)):
             raise SpecError(f"bad path segment '{raw}' in '{path}'")
         segs.append((m.group(1), [t.group(1) or "~" for t in _TOK.finditer(m.group(2))]))
     return segs
 
 
 def _get(node, key):
+    if key == "":
+        return node  # a bare "[*]" segment: the node itself (e.g. a response that is a list)
     if isinstance(node, dict):
         return node.get(key)
     if isinstance(node, list) and node and isinstance(node[0], dict):

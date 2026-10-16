@@ -32,6 +32,8 @@ Return ONLY a JSON object (a "spec") with keys: rows, fields, optional where, op
 Path language:
 - "a.b.c" walks keys from the current row. "a[0]" takes an index, "a[-1]" the last item. "a[*].b" takes the first non-empty.
 - A list of lists needs one wildcard per level: "groups[*][*].offers[*]".
+- If the whole response is a list, start 'rows' with "[*]".
+- "sum:charges[*].amount" adds every match: use it when a passenger's price is split into charges (base fare, taxes, fees) with no total field.
 - "{*}" walks the VALUES of an object whose keys are ids/codes (e.g. {"0~AB~X1": {...}, "0~AB~X2": {...}}): "faresAvailable{*}".
 - rows: ONE path that contains [*] or {*} and lands on the objects that each carry ONE price (expand every list on the way with [*]).
 - "^.x" reads x from one [*] level above the row, "^^.x" two levels above. "$.a.b" reads from the document root.
