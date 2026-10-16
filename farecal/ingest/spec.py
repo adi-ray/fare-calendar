@@ -426,6 +426,7 @@ def _matches(where: dict, stack, doc, meta) -> bool:
 
 def _split(path: str):
     segs = []
+    path = path.replace("[last]", "[-1]").replace("[first]", "[0]")
     for raw in path.replace("/", ".").split("."):
         m = _SEG.match(raw.strip())
         if not m or not (m.group(1) or m.group(2)):

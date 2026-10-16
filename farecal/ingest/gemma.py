@@ -124,7 +124,7 @@ def validate(spec: dict, samples: list[Sample]) -> tuple[list[str], dict]:
         return problems, {}
 
     with_rows = matched = 0
-    fares, multi_date = [], False
+    fares, multi_date, example_route = [], False, None
     for s in samples:
         try:
             rows = extract(spec, s.doc, s.meta)
@@ -138,6 +138,9 @@ def validate(spec: dict, samples: list[Sample]) -> tuple[list[str], dict]:
         multi_date |= len(dates) > 1
         if any(r["origin"] == s.meta.get("origin") and r["destination"] == s.meta.get("destination") for r in rows):
             matched += 1
+        elif example_route is None:
+            example_route = (sorted({f"{r['origin']}-{r['destination']}" for r in rows})[:3],
+                             f"{s.meta.get('origin')}-{s.meta.get('destination')}")
 
     stats = {"samples": len(samples), "samples_with_rows": with_rows, "rows": len(fares),
              "searched_route_found": matched, "multi_date": multi_date}
@@ -169,7 +172,13 @@ def validate(spec: dict, samples: list[Sample]) -> tuple[list[str], dict]:
         if hint:
             problems.append(hint)
     if with_rows and matched < round(0.5 * with_rows):
-        problems.append(f"the searched route appears in only {matched} of {with_rows} responses; origin/destination paths may be wrong or swapped")
+        msg = f"the searched route appears in only {matched} of {with_rows} responses"
+        if example_route:
+            got, want = example_route
+            msg += (f": rows give {', '.join(got)} but the agent searched {want}. If the destination is an intermediate "
+                    "stop, read it from the LAST segment ('segments[-1]' or 'segments[last]'); if origin and destination "
+                    "are swapped, swap the paths")
+        problems.append(msg)
     return problems, stats
 
 

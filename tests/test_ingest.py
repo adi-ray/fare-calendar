@@ -313,3 +313,14 @@ def test_rewrite_resumes_after_the_last_shared_wildcard_and_extract_falls_back()
     rows_out = extract(spec, doc, META)
     assert [(r["origin"], r["destination"], str(r["departure_date"]), r["fare"]) for r in rows_out] == [
         ("DEL", "BOM", "2026-11-03", 4100.0)]
+
+
+def test_last_alias_and_route_mismatch_names_both_routes():
+    doc = {"its": [{"segs": [{"o": "DEL", "d": "KUL"}, {"o": "KUL", "d": "DPS"}], "price": 30000}]}
+    meta = {**META, "destination": "DPS"}
+    first = {"rows": "its[*]", "fields": {"fare": "price", "origin": "segs[0].o", "destination": "segs[*].d",
+             "departure_date": "meta.departure_date"}}
+    problems, _ = gemma.validate(first, [gemma.Sample(doc, meta, "x")] * 3)
+    assert any("rows give DEL-KUL but the agent searched DEL-DPS" in p for p in problems)
+    last = {**first, "fields": {**first["fields"], "destination": "segs[last].d"}}
+    assert gemma.validate(last, [gemma.Sample(doc, meta, "x")] * 3)[0] == []
