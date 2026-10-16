@@ -115,7 +115,8 @@ Demo with synthetic data: `python scripts/make_sample_logs.py`, then `FARECAL_AR
 |---|---|---|
 | `FARECAL_ARTIFACT` | `data/forecasts.json` | forecasts file the API serves |
 | `FARECAL_MODE` | `artifact` | `live` builds the engine in-process from `FARECAL_DATA` |
-| `FARECAL_BASIC_USER` / `_PASS` | *(unset)* | browser login for agents |
+| `FARECAL_BASIC_USER` / `_PASS` | *(unset)* | agents sign in on `/login` (12-hour session cookie); Basic auth with the same credentials still works for scripts |
+| `FARECAL_SESSION_SECRET` | derived from the credentials | sign sessions with a fixed secret instead; changing it signs everyone out |
 | `FARECAL_API_KEY` | *(unset)* | `X-Api-Key` for embedding |
 | `FARECAL_ADMIN_TOKEN` | *(unset)* | enables `POST /api/admin/artifact` |
 | `FARECAL_CORS_ORIGINS` | `*` | your booking portal's origin |

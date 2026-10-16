@@ -10,11 +10,11 @@
   <style>
     :root {
       --paper: #eef2f3; --surface: #fbfcfc; --ink: #15304a; --muted: #5b6b7a; --line: #c9d3da;
-      --accent: #b0186e; --accent-ink: #ffffff; --note: #e3eaee;
+      --accent: #b0186e; --accent-ink: #ffffff; --note: #e3eaee; color-scheme: light;
     }
     @media (prefers-color-scheme: dark) {
       :root { --paper: #0d1923; --surface: #13212d; --ink: #dce6ee; --muted: #93a4b3; --line: #2b3d4c;
-              --accent: #e0559f; --accent-ink: #0d1923; --note: #182a38; }
+              --accent: #e0559f; --accent-ink: #0d1923; --note: #182a38; color-scheme: dark; }
     }
     * { box-sizing: border-box; }
     body { margin: 0; background: var(--paper); color: var(--ink);
@@ -24,14 +24,22 @@
     .brand { font-weight: 800; font-size: 15px; }
     .data-note { color: var(--muted); font-size: 13px; margin: 0; }
     .data-note.synthetic { color: var(--accent); }
+    .meta { display: flex; flex-wrap: wrap; gap: 4px 16px; align-items: baseline; }
+    .account { color: var(--muted); font-size: 13px; }
+    .account b { color: var(--ink); font-weight: 700; }
+    .account a { color: var(--ink); margin-left: 6px; text-underline-offset: 3px; }
 
     /* The route is the headline: two selects set as display type. */
     .route { display: flex; align-items: center; gap: 10px; margin: 18px 0 22px; flex-wrap: wrap; }
-    .route select { appearance: none; -webkit-appearance: none; border: 0; border-bottom: 3px solid var(--line);
-                    background: transparent; color: var(--ink); font: 800 clamp(40px, 9vw, 68px)/1 Overpass, system-ui, sans-serif;
-                    letter-spacing: -0.02em; padding: 0 2px 2px; cursor: pointer; border-radius: 0; }
-    .route select:hover { border-bottom-color: var(--ink); }
-    .route select:focus-visible, .swap:focus-visible, .go:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+    .airport { position: relative; display: inline-block; border-bottom: 3px solid var(--line); }
+    .airport:hover { border-bottom-color: var(--ink); }
+    .airport:focus-within { outline: 2px solid var(--accent); outline-offset: 4px; }
+    .code { display: block; font: 800 clamp(40px, 9vw, 68px)/1 Overpass, system-ui, sans-serif; letter-spacing: -0.02em;
+            padding: 0 2px 2px; }
+    .code::after { content: "▾"; font-size: .3em; color: var(--muted); margin-left: 6px; vertical-align: middle; }
+    .airport select { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer;
+                      font: 16px Overpass, system-ui, sans-serif; }
+    .swap:focus-visible, .go:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
     .arrow { font: 400 clamp(28px, 6vw, 44px)/1 Overpass, system-ui, sans-serif; color: var(--muted); }
     .swap { border: 1px solid var(--line); background: var(--surface); color: var(--ink); border-radius: 6px;
             height: 40px; padding: 0 12px; font: inherit; font-size: 14px; cursor: pointer; margin-left: 4px; }
@@ -57,15 +65,18 @@
   <div class="wrap">
     <div class="top">
       <span class="brand">Fare Calendar</span>
-      <p class="data-note" id="note">Loading routes…</p>
+      <div class="meta">
+        <p class="data-note" id="note">Loading routes…</p>
+        <span class="account" id="account" hidden>Signed in as <b id="who"></b><a href="/logout">Sign out</a></span>
+      </div>
     </div>
 
     <form class="route" id="route" aria-label="Route">
-      <label class="sr" for="origin" hidden>From</label>
-      <select id="origin" aria-label="From"></select>
+      <span class="airport"><span class="code" id="origin-code" aria-hidden="true">···</span>
+        <select id="origin" aria-label="Flying from"></select></span>
       <span class="arrow" aria-hidden="true">→</span>
-      <label class="sr" for="destination" hidden>To</label>
-      <select id="destination" aria-label="To"></select>
+      <span class="airport"><span class="code" id="destination-code" aria-hidden="true">···</span>
+        <select id="destination" aria-label="Flying to"></select></span>
       <button class="swap" type="button" id="swap">Swap</button>
     </form>
 
@@ -94,6 +105,8 @@
     };
     const destinations = (from) => [...new Set(pairs.filter((p) => p[0] === from).map((p) => p[1]))].sort();
     const apply = () => {
+      document.getElementById('origin-code').textContent = o.value;
+      document.getElementById('destination-code').textContent = d.value;
       cal.setAttribute('origin', o.value);
       cal.setAttribute('destination', d.value);
       document.getElementById('swap').disabled = !pairs.some((p) => p[0] === d.value && p[1] === o.value);
@@ -107,6 +120,10 @@
         ? 'Demo data: synthetic search logs, not real prices.'
         : `Fares as of ${h.as_of}. Supplier net fares before markup.`;
       note.classList.toggle('synthetic', synthetic);
+      if (h.user) {
+        document.getElementById('who').textContent = h.user;
+        document.getElementById('account').hidden = false;
+      }
       pairs = (h.routes || []).map((r) => r.split('-'));
       const origins = [...new Set(pairs.map((p) => p[0]))].sort();
       const start = origins.includes('DEL') ? 'DEL' : origins[0];

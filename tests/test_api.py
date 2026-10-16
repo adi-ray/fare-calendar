@@ -61,8 +61,9 @@ def test_login_required_when_configured(tmp_path, monkeypatch, art):
     c, _ = client(tmp_path, monkeypatch, art, FARECAL_BASIC_USER="agent", FARECAL_BASIC_PASS="pw", FARECAL_API_KEY="k1")
     q = {"origin": "DEL", "destination": "BOM", "month": "2026-06"}
     r = c.get("/api/calendar", params=q)
-    assert r.status_code == 401 and "Basic" in r.headers["www-authenticate"]
-    assert c.get("/", headers=basic("agent", "nope")).status_code == 401
+    assert r.status_code == 401 and "www-authenticate" not in r.headers   # never the browser's native popup
+    page = c.get("/", headers=basic("agent", "nope"), follow_redirects=False)
+    assert page.status_code == 303 and page.headers["location"] == "/login?next=/"
     assert c.get("/api/calendar", params=q, headers=basic("agent", "pw")).status_code == 200
     assert c.get("/api/calendar", params=q, headers={"X-Api-Key": "k1"}).status_code == 200
     h = c.get("/api/health").json()  # public, but no route list
@@ -118,3 +119,34 @@ def test_v2_artifact_round_trips_the_engine():
         if e["source"] == "estimate":   # range stored as whole % of the fare: within 1% + rounding
             assert abs(got["low"] - e["low"]) <= e["fare"] * 0.01 + 10
             assert abs(got["high"] - e["high"]) <= e["fare"] * 0.01 + 10
+
+def test_sign_in_page_session_cookie_and_sign_out(tmp_path, monkeypatch, art):
+    c, _ = client(tmp_path, monkeypatch, art, FARECAL_BASIC_USER="agent", FARECAL_BASIC_PASS="pw")
+    q = {"origin": "DEL", "destination": "BOM", "month": "2026-06"}
+    form = c.get("/login?next=/")
+    assert form.status_code == 200 and 'name="username"' in form.text and "{{" not in form.text
+    bad = c.post("/login", data={"username": "agent", "password": "wrong", "next": "/"}, follow_redirects=False)
+    assert bad.status_code == 401 and "don't match" in __import__("html").unescape(bad.text) and "farecal_session" not in bad.headers.get("set-cookie", "")
+    ok = c.post("/login", data={"username": "agent", "password": "pw", "next": "/"}, follow_redirects=False)
+    assert ok.status_code == 303 and ok.headers["location"] == "/"
+    cookie = ok.headers["set-cookie"]
+    assert "HttpOnly" in cookie and "SameSite=lax" in cookie
+    assert c.get("/", follow_redirects=False).status_code == 200            # cookie kept by the client
+    assert c.get("/api/calendar", params=q).status_code == 200
+    assert c.get("/api/health").json()["user"] == "agent"
+    out = c.get("/logout", follow_redirects=False)
+    assert out.status_code == 303 and out.headers["location"] == "/login"
+    c.cookies.clear()
+    assert c.get("/api/calendar", params=q).status_code == 401
+
+
+def test_sign_in_rejects_open_redirects_and_forged_cookies(tmp_path, monkeypatch, art):
+    c, _ = client(tmp_path, monkeypatch, art, FARECAL_BASIC_USER="agent", FARECAL_BASIC_PASS="pw")
+    for evil in ("//evil.example", "https://evil.example", r"/\evil.example"):
+        r = c.post("/login", data={"username": "agent", "password": "pw", "next": evil}, follow_redirects=False)
+        assert r.headers["location"] == "/"
+        c.cookies.clear()
+    forged = base64.urlsafe_b64encode(b"agent|9999999999|" + b"0" * 64).decode()
+    c.cookies.set("farecal_session", forged)
+    assert c.get("/api/calendar", params={"origin": "DEL", "destination": "BOM", "month": "2026-06"}).status_code == 401
+    assert '<script' not in c.get("/login", params={"next": '/"><script>alert(1)</script>'}).text.split("<form")[1]

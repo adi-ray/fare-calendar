@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Sign in · Fare Calendar</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Overpass:wght@400;500;700;800&display=swap" rel="stylesheet">
+  <style>
+    :root { --paper: #eef2f3; --surface: #fbfcfc; --ink: #15304a; --muted: #5b6b7a; --line: #c9d3da;
+            --accent: #b0186e; --accent-ink: #ffffff; --bar: #c9d3da; --error: #a33a2b; color-scheme: light; }
+    @media (prefers-color-scheme: dark) {
+      :root { --paper: #0d1923; --surface: #13212d; --ink: #dce6ee; --muted: #93a4b3; --line: #2b3d4c;
+              --accent: #e0559f; --accent-ink: #0d1923; --bar: #2f4354; --error: #ef7b66; color-scheme: dark; }
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; min-height: 100vh; display: grid; place-items: center; background: var(--paper); color: var(--ink);
+           font: 16px/1.5 Overpass, system-ui, -apple-system, "Segoe UI", sans-serif; padding: 24px 16px; }
+    main { width: 100%; max-width: 380px; }
+    .brand { font-weight: 800; font-size: 15px; margin: 0 0 28px; }
+    /* A quiet echo of the calendar's fare profile: troughs are the cheap days. */
+    .profile { display: grid; grid-template-columns: repeat(21, 1fr); gap: 3px; align-items: end; height: 44px; margin-bottom: 18px; }
+    .profile span { background: var(--bar); border-radius: 2px 2px 0 0; }
+    .profile span.cheap { background: var(--accent); }
+    h1 { font-size: 40px; line-height: 1.05; letter-spacing: -0.02em; margin: 0 0 6px; font-weight: 800; }
+    .lede { color: var(--muted); margin: 0 0 24px; }
+    form { display: grid; gap: 14px; }
+    label { display: grid; gap: 6px; font-weight: 700; font-size: 14px; }
+    input { font: inherit; color: var(--ink); background: var(--surface); border: 1px solid var(--line); border-radius: 6px;
+            padding: 11px 12px; }
+    input:hover { border-color: var(--muted); }
+    input:focus-visible, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-color: var(--accent); }
+    button { margin-top: 6px; border: 0; border-radius: 6px; padding: 13px 18px; background: var(--accent); color: var(--accent-ink);
+             font: 700 16px/1 Overpass, system-ui, sans-serif; cursor: pointer; }
+    .error { margin: 0 0 16px; color: var(--error); font-weight: 500; }
+    .help { color: var(--muted); font-size: 14px; margin: 22px 0 0; }
+  </style>
+</head>
+<body>
+  <main>
+    <p class="brand">Fare Calendar</p>
+    <div class="profile" aria-hidden="true">
+      <span style="height:70%"></span><span style="height:82%"></span><span style="height:64%"></span><span style="height:90%"></span>
+      <span style="height:76%"></span><span style="height:58%"></span><span style="height:52%"></span><span style="height:61%"></span>
+      <span style="height:72%"></span><span style="height:66%"></span><span style="height:49%"></span><span style="height:43%"></span>
+      <span class="cheap" style="height:34%"></span><span style="height:41%"></span><span style="height:55%"></span><span style="height:63%"></span>
+      <span style="height:57%"></span><span style="height:68%"></span><span style="height:74%"></span><span style="height:60%"></span>
+      <span style="height:66%"></span>
+    </div>
+    <h1>Sign in</h1>
+    <p class="lede">See the cheapest day to fly before you search.</p>
+    {{error}}
+    <form method="post" action="/login">
+      <input type="hidden" name="next" value="{{next}}">
+      <label>Username <input name="username" value="{{username}}" autocomplete="username" required{{autofocus_user}}></label>
+      <label>Password <input name="password" type="password" autocomplete="current-password" required{{autofocus_pass}}></label>
+      <button type="submit">Sign in</button>
+    </form>
+    <p class="help">No account yet? Ask your admin to add you.</p>
+  </main>
+</body>
+</html>

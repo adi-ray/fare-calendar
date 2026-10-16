@@ -6,24 +6,31 @@ Two modes:
   live                FARECAL_MODE=live builds the engine (Chronos) in-process from FARECAL_DATA.
 
 Access control (any one is enough when set; nothing set = open, for local dev):
-  FARECAL_BASIC_USER / FARECAL_BASIC_PASS   browser login for agents
+  FARECAL_BASIC_USER / FARECAL_BASIC_PASS   agents sign in on /login (session cookie); Basic auth
+                                            with the same credentials still works for scripts
   FARECAL_API_KEY                           X-Api-Key header, for embedding in your portal
   FARECAL_ADMIN_TOKEN                       X-Admin-Token, for uploading a new artifact
 """
 from __future__ import annotations
 
+import asyncio
 import base64
+import hashlib
+import hmac
+import html
 import json
 import os
 import re
 import secrets
 import threading
+import time
 from datetime import date
 from pathlib import Path
+from urllib.parse import parse_qs, quote
 
 from fastapi import FastAPI, Header, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 from .view import artifact_routes, month_from_artifact
@@ -44,6 +51,11 @@ ADMIN_TOKEN = os.environ.get("FARECAL_ADMIN_TOKEN", "")
 ORIGINS = [o.strip() for o in os.environ.get("FARECAL_CORS_ORIGINS", "*").split(",") if o.strip()]
 PROTECTED = bool((BASIC_USER and BASIC_PASS) or API_KEY)
 IATA = re.compile(r"^[A-Za-z]{3}$")
+COOKIE = "farecal_session"
+SESSION_SECONDS = 12 * 3600
+# Changing the password (or setting FARECAL_SESSION_SECRET) signs everyone out.
+SESSION_KEY = (os.environ.get("FARECAL_SESSION_SECRET") or
+               hashlib.sha256(f"{BASIC_USER}:{BASIC_PASS}:{ADMIN_TOKEN}".encode()).hexdigest()).encode()
 MAX_ARTIFACT_BYTES = 20 * 1024 * 1024
 
 app = FastAPI(title="Fare Calendar", version="0.2.0")
@@ -55,8 +67,33 @@ _state: dict = {}
 
 
 # ---- access control ------------------------------------------------------
+def _sign(payload: str) -> str:
+    return hmac.new(SESSION_KEY, payload.encode(), hashlib.sha256).hexdigest()
+
+
+def _make_session(user: str) -> str:
+    payload = f"{user}|{int(time.time()) + SESSION_SECONDS}"
+    return base64.urlsafe_b64encode(f"{payload}|{_sign(payload)}".encode()).decode()
+
+
+def session_user(request: Request) -> str | None:
+    """The signed-in agent from the session cookie, if it's valid and unexpired."""
+    raw = request.cookies.get(COOKIE)
+    if not raw or not BASIC_USER:
+        return None
+    try:
+        user, exp, sig = base64.urlsafe_b64decode(raw.encode()).decode().rsplit("|", 2)
+    except (ValueError, UnicodeDecodeError):
+        return None
+    if not hmac.compare_digest(sig, _sign(f"{user}|{exp}")) or int(exp) < time.time():
+        return None
+    return user if hmac.compare_digest(user, BASIC_USER) else None
+
+
 def _authorised(request: Request) -> bool:
     if not PROTECTED:
+        return True
+    if session_user(request):
         return True
     if API_KEY and secrets.compare_digest(request.headers.get("x-api-key", ""), API_KEY):
         return True
@@ -70,13 +107,65 @@ def _authorised(request: Request) -> bool:
     return False
 
 
+OPEN_PATHS = ("/api/health", "/login", "/logout", "/favicon.ico")
+
+
 @app.middleware("http")
 async def require_login(request: Request, call_next):
-    open_paths = request.url.path == "/api/health" or request.url.path.startswith("/api/admin/") or request.method == "OPTIONS"
-    if open_paths or _authorised(request):
+    path = request.url.path
+    is_open = (path in OPEN_PATHS or path.startswith(("/api/admin/", "/widget/")) or request.method == "OPTIONS")
+    if is_open or _authorised(request):
         return await call_next(request)
-    headers = {"WWW-Authenticate": 'Basic realm="Fare Calendar"'} if BASIC_USER else {}
-    return JSONResponse({"detail": "Login required"}, status_code=401, headers=headers)
+    if path.startswith("/api/"):
+        # No WWW-Authenticate header: browsers must never show their native popup.
+        return JSONResponse({"detail": "Sign in required"}, status_code=401)
+    return RedirectResponse(f"/login?next={quote(path)}", status_code=303)
+
+
+def _safe_next(target: str | None) -> str:
+    """Only same-site paths, so the sign-in page can't be used as an open redirect."""
+    t = (target or "/").strip()
+    return t if t.startswith("/") and not t.startswith(("//", "/\\")) else "/"
+
+
+def _login_page(error: str = "", next_path: str = "/", status: int = 200, username: str = "") -> HTMLResponse:
+    page = (ROOT / "widget" / "login.html").read_text(encoding="utf-8")
+    page = page.replace("{{next}}", html.escape(next_path, quote=True))
+    page = page.replace("{{username}}", html.escape(username, quote=True))
+    # After a failed attempt, keep the username and put the cursor in the password field.
+    page = page.replace("{{autofocus_user}}", "" if username else " autofocus")
+    page = page.replace("{{autofocus_pass}}", " autofocus" if username else "")
+    page = page.replace("{{error}}", f'<p class="error" role="alert">{html.escape(error)}</p>' if error else "")
+    return HTMLResponse(page, status_code=status)
+
+
+@app.get("/login")
+def login_form(request: Request, next: str = "/"):
+    if not BASIC_USER or session_user(request):
+        return RedirectResponse(_safe_next(next), status_code=303)
+    return _login_page(next_path=_safe_next(next))
+
+
+@app.post("/login")
+async def login(request: Request):
+    form = {k: v[0] for k, v in parse_qs((await request.body()).decode("utf-8", "replace")).items()}
+    user, pw, nxt = form.get("username", ""), form.get("password", ""), _safe_next(form.get("next"))
+    ok = bool(BASIC_USER and BASIC_PASS) and hmac.compare_digest(user, BASIC_USER) and hmac.compare_digest(pw, BASIC_PASS)
+    if not ok:
+        await asyncio.sleep(0.5)  # slows guessing without locking anyone out
+        return _login_page("That username and password don't match. Check both and try again.", nxt, 401, user)
+    resp = RedirectResponse(nxt, status_code=303)
+    https = request.headers.get("x-forwarded-proto", request.url.scheme) == "https"
+    resp.set_cookie(COOKIE, _make_session(user), max_age=SESSION_SECONDS, httponly=True, secure=https,
+                    samesite="lax", path="/")
+    return resp
+
+
+@app.get("/logout")
+def logout():
+    resp = RedirectResponse("/login", status_code=303)
+    resp.delete_cookie(COOKIE, path="/")
+    return resp
 
 
 # ---- data ----------------------------------------------------------------
@@ -126,7 +215,9 @@ def health(request: Request):
         details = info()
     except HTTPException as e:
         return {"ok": False, "detail": e.detail, **deploy}
-    return {"ok": True, **deploy, **(details if _authorised(request) else {"as_of": details["as_of"]})}
+    if not _authorised(request):
+        return {"ok": True, **deploy, "as_of": details["as_of"]}
+    return {"ok": True, **deploy, **details, "user": session_user(request)}
 
 
 @app.get("/api/routes")
