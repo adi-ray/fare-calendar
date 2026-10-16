@@ -34,7 +34,8 @@ ARTIFACT = Path(os.environ.get("FARECAL_ARTIFACT", ROOT / "data" / "forecasts.js
 # Read-only fallback that survives restarts, e.g. a Render Secret File at /etc/secrets/forecasts.json.
 # Whichever of ARTIFACT / SEED is newer (by as_of, then built_at) is served.
 # Render puts a Secret File both at /etc/secrets/<name> and in the app's root folder.
-SEEDS = [Path(x) for x in (os.environ.get("FARECAL_ARTIFACT_SEED"), "/etc/secrets/forecasts.json") if x] + [ROOT / "forecasts.json"]
+SEEDS = list(dict.fromkeys(  # de-duplicated, order kept
+    [Path(x) for x in (os.environ.get("FARECAL_ARTIFACT_SEED"), "/etc/secrets/forecasts.json") if x] + [ROOT / "forecasts.json"]))
 DATA = Path(os.environ.get("FARECAL_DATA", ROOT / "data" / "sample_search_logs.SYNTHETIC.csv"))
 BASIC_USER = os.environ.get("FARECAL_BASIC_USER", "")
 BASIC_PASS = os.environ.get("FARECAL_BASIC_PASS", "")
