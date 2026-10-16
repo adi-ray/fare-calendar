@@ -71,10 +71,33 @@ class ChronosForecaster:
         return out
 
 
-def get_forecaster():
-    """Chronos by default; FARECAL_FORECASTER=naive for the offline baseline."""
-    if os.environ.get("FARECAL_FORECASTER", "chronos").lower() == "naive":
+class Ensemble:
+    """Average of several forecasters in log space (quantile by quantile).
+    Models that err differently often beat each one alone."""
+
+    def __init__(self, members: list, weights: list[float] | None = None):
+        self.members = members
+        self.weights = np.asarray(weights or [1.0] * len(members), dtype=float)
+        self.weights = self.weights / self.weights.sum()
+        self.name = "ensemble(" + "+".join(m.name.split("/")[-1] for m in members) + ")"
+
+    def predict(self, series: list[np.ndarray], horizon: int) -> list[Forecast]:
+        runs = [m.predict(series, horizon) for m in self.members]
+        out = []
+        for i in range(len(series)):
+            avg = lambda attr: sum(w * getattr(r[i], attr) for w, r in zip(self.weights, runs))  # noqa: E731
+            out.append(Forecast(avg("low"), avg("mid"), avg("high")))
+        return out
+
+
+def get_forecaster(kind: str | None = None):
+    """FARECAL_FORECASTER: 'chronos' (default), 'naive' (offline baseline) or 'ensemble'
+    (Chronos + baseline, averaged). FARECAL_MODEL_ID picks the Chronos size."""
+    kind = (kind or os.environ.get("FARECAL_FORECASTER", "chronos")).lower()
+    if kind == "naive":
         return SeasonalNaive()
+    if kind == "ensemble":
+        return Ensemble([ChronosForecaster(), SeasonalNaive()])
     return ChronosForecaster()
 
 

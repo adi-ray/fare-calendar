@@ -23,7 +23,7 @@ import pandas as pd
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from farecal.data import load_observations  # noqa: E402
 from farecal.engine import FareEngine  # noqa: E402
-from farecal.forecast import ChronosForecaster, SeasonalNaive  # noqa: E402
+from farecal.forecast import ChronosForecaster, Ensemble, SeasonalNaive  # noqa: E402
 
 
 def run(df: pd.DataFrame, model, cutoff: date, window: int = 2) -> pd.DataFrame:
@@ -54,6 +54,8 @@ if __name__ == "__main__":
     ap.add_argument("--data", default="data/sample_search_logs.SYNTHETIC.csv")
     ap.add_argument("--cutoffs", help="comma-separated dates; default: every 3 days over the last 15 days of data")
     ap.add_argument("--window", type=int, default=2)
+    ap.add_argument("--models", default="naive,chronos",
+                    help="comma list of: naive, chronos (small), chronos-base, chronos-tiny, ensemble, ensemble-base")
     a = ap.parse_args()
 
     df = load_observations(a.data)
@@ -62,7 +64,18 @@ if __name__ == "__main__":
                else [last - timedelta(days=d) for d in (14, 11, 8, 5, 2)])
     print(f"data: {a.data} | {len(df):,} observations | {df['route'].nunique()} routes | cutoffs {', '.join(map(str, cutoffs))}")
 
-    for model in (SeasonalNaive(), ChronosForecaster()):
+    def build(name):
+        sizes = {"chronos": "small", "chronos-base": "base", "chronos-tiny": "tiny"}
+        if name == "naive":
+            return SeasonalNaive()
+        if name in sizes:
+            return ChronosForecaster(f"amazon/chronos-bolt-{sizes[name]}")
+        if name.startswith("ensemble"):
+            size = "base" if name.endswith("base") else "small"
+            return Ensemble([ChronosForecaster(f"amazon/chronos-bolt-{size}"), SeasonalNaive()])
+        raise SystemExit(f"unknown model {name}")
+
+    for model in (build(m.strip()) for m in a.models.split(",")):
         res = pd.concat([run(df, model, c, a.window) for c in cutoffs], ignore_index=True)
         s = summarise(res)
         print(f"\n{model.name}")

@@ -82,3 +82,18 @@ def test_estimates_reflect_weekday_pattern(eng):
 def test_unknown_route(eng):
     with pytest.raises(KeyError):
         eng.month("XXX", "YYY", 2026, 6)
+
+
+def test_ensemble_averages_members():
+    from farecal.forecast import Ensemble, Forecast
+
+    class Const:
+        def __init__(self, v, name):
+            self.v, self.name = v, name
+
+        def predict(self, series, horizon):
+            return [Forecast(np.full(horizon, self.v - 1), np.full(horizon, self.v), np.full(horizon, self.v + 1))
+                    for _ in series]
+
+    fc = Ensemble([Const(8.0, "a"), Const(9.0, "b")]).predict([np.ones(5)], 3)[0]
+    assert np.allclose(fc.mid, 8.5) and np.allclose(fc.low, 7.5) and np.allclose(fc.high, 9.5)

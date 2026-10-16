@@ -3,47 +3,80 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Fare Calendar Demo</title>
+  <title>Fare Calendar</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Overpass:wght@400;500;700;800&display=swap" rel="stylesheet">
   <style>
-    :root { --bg:#f4f5f7; --card:#fff; --ink:#1f2328; --muted:#6b7280; --line:#e5e7eb; --accent:#1d4ed8; --accent-ink:#fff; }
-    @media (prefers-color-scheme: dark) {
-      :root { --bg:#121417; --card:#1b1e22; --ink:#e8e6e3; --muted:#9ca3af; --line:#30353b; --accent:#60a5fa; --accent-ink:#0b1220; }
+    :root {
+      --paper: #eef2f3; --surface: #fbfcfc; --ink: #15304a; --muted: #5b6b7a; --line: #c9d3da;
+      --accent: #b0186e; --accent-ink: #ffffff; --note: #e3eaee;
     }
-    * { box-sizing:border-box; }
-    body { margin:0; background:var(--bg); color:var(--ink); font:15px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif; }
-    .wrap { max-width:980px; margin:0 auto; padding:24px 16px; }
-    h1 { margin:0; font-size:1.5rem; }
-    .sub { color:var(--muted); margin:4px 0 16px; }
-    .banner { background:#fef3c7; color:#78350f; border-radius:8px; padding:8px 12px; font-size:13px; margin-bottom:16px; }
-    @media (prefers-color-scheme: dark) { .banner { background:#3b2f0b; color:#fde68a; } }
-    .layout { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,460px); gap:16px; align-items:start; }
-    .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:16px; }
-    form { display:grid; gap:12px; }
-    .row { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
-    label { display:grid; gap:4px; font-size:13px; color:var(--muted); }
-    select, input { font:inherit; color:var(--ink); background:var(--bg); border:1px solid var(--line); border-radius:8px; padding:9px 10px; }
-    button.go { font:inherit; font-weight:600; border:0; border-radius:8px; padding:11px; background:var(--accent); color:var(--accent-ink); cursor:pointer; }
-    .pick { font-size:14px; min-height:1.5em; }
-    @media (max-width:760px) { .layout { grid-template-columns:1fr; } }
+    @media (prefers-color-scheme: dark) {
+      :root { --paper: #0d1923; --surface: #13212d; --ink: #dce6ee; --muted: #93a4b3; --line: #2b3d4c;
+              --accent: #e0559f; --accent-ink: #0d1923; --note: #182a38; }
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: var(--paper); color: var(--ink);
+           font: 16px/1.5 Overpass, system-ui, -apple-system, "Segoe UI", sans-serif; font-variant-numeric: tabular-nums; }
+    .wrap { max-width: 1000px; margin: 0 auto; padding: 24px 16px 40px; }
+    .top { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: baseline; justify-content: space-between; }
+    .brand { font-weight: 800; font-size: 15px; }
+    .data-note { color: var(--muted); font-size: 13px; margin: 0; }
+    .data-note.synthetic { color: var(--accent); }
+
+    /* The route is the headline: two selects set as display type. */
+    .route { display: flex; align-items: center; gap: 10px; margin: 18px 0 22px; flex-wrap: wrap; }
+    .route select { appearance: none; -webkit-appearance: none; border: 0; border-bottom: 3px solid var(--line);
+                    background: transparent; color: var(--ink); font: 800 clamp(40px, 9vw, 68px)/1 Overpass, system-ui, sans-serif;
+                    letter-spacing: -0.02em; padding: 0 2px 2px; cursor: pointer; border-radius: 0; }
+    .route select:hover { border-bottom-color: var(--ink); }
+    .route select:focus-visible, .swap:focus-visible, .go:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+    .arrow { font: 400 clamp(28px, 6vw, 44px)/1 Overpass, system-ui, sans-serif; color: var(--muted); }
+    .swap { border: 1px solid var(--line); background: var(--surface); color: var(--ink); border-radius: 6px;
+            height: 40px; padding: 0 12px; font: inherit; font-size: 14px; cursor: pointer; margin-left: 4px; }
+    .swap:hover { border-color: var(--ink); }
+
+    .layout { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 480px); gap: 28px; align-items: start; }
+    .side { display: grid; gap: 16px; }
+    .pick { border-left: 4px solid var(--line); padding: 4px 0 4px 16px; min-height: 150px; }
+    .pick.has { border-left-color: var(--accent); }
+    .pick .when { font-weight: 700; font-size: 18px; }
+    .pick .fare { font-weight: 800; font-size: 44px; line-height: 1.05; letter-spacing: -0.02em; margin: 6px 0 2px; }
+    .pick .range, .pick .why { color: var(--muted); margin: 0; }
+    .pick .empty { color: var(--muted); margin: 0; max-width: 34ch; }
+    .go { justify-self: start; border: 0; border-radius: 6px; padding: 12px 18px; background: var(--accent); color: var(--accent-ink);
+          font: 700 16px/1 Overpass, system-ui, sans-serif; cursor: pointer; }
+    .go:disabled { opacity: .45; cursor: not-allowed; }
+    .handoff { color: var(--muted); font-size: 14px; margin: 0; min-height: 1.5em; }
+    fare-calendar { --fc-surface: var(--surface); }
+    @media (max-width: 820px) { .layout { grid-template-columns: 1fr; } .pick { min-height: 0; } fare-calendar { order: -1; } }
   </style>
 </head>
 <body>
   <div class="wrap">
-    <h1>Agent flight search</h1>
-    <p class="sub">The date picker shows the estimated lowest fare for each date before the agent runs a live search.</p>
-    <div class="banner" id="banner" hidden></div>
+    <div class="top">
+      <span class="brand">Fare Calendar</span>
+      <p class="data-note" id="note">Loading routes…</p>
+    </div>
+
+    <form class="route" id="route" aria-label="Route">
+      <label class="sr" for="origin" hidden>From</label>
+      <select id="origin" aria-label="From"></select>
+      <span class="arrow" aria-hidden="true">→</span>
+      <label class="sr" for="destination" hidden>To</label>
+      <select id="destination" aria-label="To"></select>
+      <button class="swap" type="button" id="swap">Swap</button>
+    </form>
 
     <div class="layout">
-      <form class="card" id="search">
-        <div class="row">
-          <label>From <select name="origin" id="origin"></select></label>
-          <label>To <select name="destination" id="destination"></select></label>
+      <section class="side" aria-live="polite">
+        <div class="pick" id="pick">
+          <p class="empty">Pick a day on the calendar to see its fare and where the number comes from.</p>
         </div>
-        <label>Departure date <input name="date" id="date" readonly placeholder="Pick a date on the calendar"></label>
-        <p class="pick" id="pick"></p>
-        <button class="go" type="submit">Search live fares</button>
-      </form>
-
+        <button class="go" id="go" type="button" disabled>Search live fares</button>
+        <p class="handoff" id="handoff"></p>
+      </section>
       <fare-calendar id="cal"></fare-calendar>
     </div>
   </div>
@@ -53,38 +86,84 @@
     const cal = document.getElementById('cal');
     const o = document.getElementById('origin');
     const d = document.getElementById('destination');
+    let pairs = [];
+    let picked = null;
+
+    const options = (sel, values, keep) => {
+      sel.innerHTML = values.map((x) => `<option${x === keep ? ' selected' : ''}>${x}</option>`).join('');
+    };
+    const destinations = (from) => [...new Set(pairs.filter((p) => p[0] === from).map((p) => p[1]))].sort();
+    const apply = () => {
+      cal.setAttribute('origin', o.value);
+      cal.setAttribute('destination', d.value);
+      document.getElementById('swap').disabled = !pairs.some((p) => p[0] === d.value && p[1] === o.value);
+      clearPick();
+    };
 
     fetch('/api/health').then((r) => r.json()).then((h) => {
-      const b = document.getElementById('banner');
-      b.hidden = false;
-      b.textContent = /SYNTHETIC/i.test(h.label || '')
-        ? `Demo data: fares here are SYNTHETIC search logs, not real prices. Model: ${h.model}.`
-        : `Forecast as of ${h.as_of} (${h.model}). Supplier net fares before markup; indicative only.`;
-      const pairs = h.routes.map((r) => r.split('-'));
-      const uniq = (xs) => [...new Set(xs)].sort();
-      o.innerHTML = uniq(pairs.map((p) => p[0])).map((x) => `<option>${x}</option>`).join('');
-      const sync = () => {
-        d.innerHTML = pairs.filter((p) => p[0] === o.value).map((p) => `<option>${p[1]}</option>`).join('');
-        cal.setAttribute('origin', o.value);
-        cal.setAttribute('destination', d.value);
-      };
-      o.addEventListener('change', sync);
-      d.addEventListener('change', () => cal.setAttribute('destination', d.value));
-      sync();
+      const note = document.getElementById('note');
+      const synthetic = /SYNTHETIC/i.test(h.label || '');
+      note.textContent = synthetic
+        ? 'Demo data: synthetic search logs, not real prices.'
+        : `Fares as of ${h.as_of}. Supplier net fares before markup.`;
+      note.classList.toggle('synthetic', synthetic);
+      pairs = (h.routes || []).map((r) => r.split('-'));
+      const origins = [...new Set(pairs.map((p) => p[0]))].sort();
+      const start = origins.includes('DEL') ? 'DEL' : origins[0];
+      options(o, origins, start);
+      const dests = destinations(start);
+      options(d, dests, dests.includes('BOM') ? 'BOM' : dests[0]);
+      apply();
+    }).catch(() => { document.getElementById('note').textContent = 'Couldn\'t reach the fare service. Reload to try again.'; });
+
+    o.addEventListener('change', () => { options(d, destinations(o.value)); apply(); });
+    d.addEventListener('change', apply);
+    document.getElementById('swap').addEventListener('click', () => {
+      const [from, to] = [o.value, d.value];
+      o.value = to;
+      options(d, destinations(to), from);
+      apply();
     });
+
+    function clearPick() {
+      picked = null;
+      document.getElementById('pick').className = 'pick';
+      document.getElementById('pick').innerHTML =
+        '<p class="empty">Pick a day on the calendar to see its fare and where the number comes from.</p>';
+      document.getElementById('go').disabled = true;
+      document.getElementById('handoff').textContent = '';
+    }
+
+    const ago = (iso) => {
+      const days = Math.round((Date.now() - new Date(iso).getTime()) / 86400000);
+      return days <= 0 ? 'today' : days === 1 ? 'yesterday' : `${days} days ago`;
+    };
 
     cal.addEventListener('fare-select', (e) => {
       const x = e.detail;
-      document.getElementById('date').value = x.date;
+      picked = x;
       const money = (n) => new Intl.NumberFormat(undefined, { style: 'currency', currency: x.currency, maximumFractionDigits: 0 }).format(n);
-      document.getElementById('pick').textContent = x.fare == null ? 'No estimate for this date.'
-        : x.source === 'seen' ? `Lowest fare seen recently: ${money(x.fare)}`
-        : `Estimated lowest fare: ${money(x.fare)} (likely ${money(x.low)}–${money(x.high)})`;
+      const when = new Date(`${x.date}T00:00`).toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' });
+      const box = document.getElementById('pick');
+      box.className = 'pick has';
+      if (x.fare == null) {
+        box.innerHTML = `<div class="when">${when}</div><p class="why">No fare yet for this day. A live search will find one.</p>`;
+      } else if (x.source === 'seen') {
+        box.innerHTML = `<div class="when">${when}</div><div class="fare">${money(x.fare)}</div>
+          <p class="why">Lowest fare an agent got for this day, ${ago(x.seen_at)}.${x.cheapest ? ' Cheapest day this month.' : ''}</p>`;
+      } else {
+        box.innerHTML = `<div class="when">${when}</div><div class="fare">${money(x.fare)}</div>
+          <p class="range">Likely ${money(x.low)} to ${money(x.high)}</p>
+          <p class="why">Estimated by ${x.model.split('/').pop()} from nearby dates. Nobody searched this day recently.${x.cheapest ? ' Cheapest day this month.' : ''}</p>`;
+      }
+      document.getElementById('go').disabled = false;
+      document.getElementById('handoff').textContent = '';
     });
 
-    document.getElementById('search').addEventListener('submit', (e) => {
-      e.preventDefault();
-      alert('In the real app this hands off to your live supplier search.');
+    document.getElementById('go').addEventListener('click', () => {
+      if (!picked) return;
+      document.getElementById('handoff').textContent =
+        `In the portal this opens a live search for ${o.value} to ${d.value} on ${picked.date}.`;
     });
   </script>
 </body>
