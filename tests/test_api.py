@@ -7,9 +7,9 @@ from datetime import date, timedelta
 import pytest
 from fastapi.testclient import TestClient
 
+from farecal.data import clean
 from farecal.engine import FareEngine
 from farecal.forecast import SeasonalNaive
-from farecal.data import clean
 from scripts.make_sample_logs import generate
 
 TODAY = date(2026, 6, 1)

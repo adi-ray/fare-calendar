@@ -59,7 +59,7 @@ class FareEngine:
             grid = s.reindex(pd.date_range(s.index.min(), end, freq="D"))
             ahead = [d for d in s.index if today <= d <= end]
             starts = [today] + [d + pd.Timedelta(days=1) for d in ahead if d < end]
-            for i, a in enumerate(starts):
+            for a in starts:
                 stop = next((d for d in ahead if d >= a), end)  # forecast through the next observed date
                 ctx = grid[grid.index < a]
                 if ctx.notna().sum() < MIN_CONTEXT_OBS:
@@ -72,7 +72,7 @@ class FareEngine:
                 continue
             h = SHORT_HORIZON if short else max(j[2] for j in batch)
             preds = self.forecaster.predict([j[3] for j in batch], h)
-            for (route, a, n, _), fc in zip(batch, preds):
+            for (route, a, n, _), fc in zip(batch, preds, strict=True):
                 for k in range(n):
                     self.est[route][(a + pd.Timedelta(days=k)).date()] = (fc.low[k], fc.mid[k], fc.high[k])
 

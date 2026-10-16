@@ -33,6 +33,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
+from . import __version__
 from .view import artifact_routes, month_from_artifact
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -58,7 +59,7 @@ SESSION_KEY = (os.environ.get("FARECAL_SESSION_SECRET") or
                hashlib.sha256(f"{BASIC_USER}:{BASIC_PASS}:{ADMIN_TOKEN}".encode()).hexdigest()).encode()
 MAX_ARTIFACT_BYTES = 20 * 1024 * 1024
 
-app = FastAPI(title="Fare Calendar", version="0.2.0")
+app = FastAPI(title="Fare Calendar", version=__version__)
 app.add_middleware(CORSMiddleware, allow_origins=ORIGINS, allow_methods=["GET", "POST"],
                    allow_headers=["X-Api-Key", "Content-Type"])
 
@@ -209,7 +210,7 @@ def info() -> dict:
 def health(request: Request):
     """Public liveness check; details only for authorised callers. 'commit' and 'files_found'
     make a stale deploy or a missing Secret File obvious without exposing paths or data."""
-    deploy = {"commit": os.environ.get("RENDER_GIT_COMMIT", "")[:7] or None,
+    deploy = {"version": __version__, "commit": os.environ.get("RENDER_GIT_COMMIT", "")[:7] or None,
               "files_found": sum(1 for p in [ARTIFACT, *SEEDS] if p.is_file())}
     try:
         details = info()
@@ -239,7 +240,7 @@ def calendar(origin: str = Query(...), destination: str = Query(...),
             return engine().month(origin, destination, year, mon)
         return month_from_artifact(artifact(), route, year, mon)
     except KeyError:
-        raise HTTPException(404, f"No fare history for {route}")
+        raise HTTPException(404, f"No fare history for {route}") from None
 
 
 @app.post("/api/admin/artifact")
@@ -255,7 +256,7 @@ async def upload_artifact(request: Request, x_admin_token: str = Header(default=
         date.fromisoformat(art["as_of"])
         assert art.get("version") in (1, 2) and isinstance(art.get("days") or art.get("routes"), dict) and art.get("model")
     except (ValueError, KeyError, AssertionError, TypeError):
-        raise HTTPException(400, "Not a fare-calendar artifact (version 1 or 2)")
+        raise HTTPException(400, "Not a fare-calendar artifact (version 1 or 2)") from None
     ARTIFACT.parent.mkdir(parents=True, exist_ok=True)
     tmp = ARTIFACT.with_suffix(".tmp")
     tmp.write_bytes(raw)

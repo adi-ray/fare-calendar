@@ -51,7 +51,7 @@ def generate(start: date, end: date, per_day: int, seed: int) -> pd.DataFrame:
             lead = np.minimum(rng.exponential(18, n).astype(int), 150)
             hours = rng.integers(8, 22, n)
             mins = rng.integers(0, 60, n)
-            for L, h, m in zip(lead, hours, mins):
+            for L, h, m in zip(lead, hours, mins, strict=True):
                 dep = sday + timedelta(days=int(L))
                 trend = 1 + 0.04 * ((dep - start).days / 365)
                 fare = base * day_factor(dep) * lead_mult(np.array([L]))[0] * trend * rng.lognormal(0, 0.07)

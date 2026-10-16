@@ -1,0 +1,16 @@
+# Only the API, the widget and the synthetic demo forecasts go into the image.
+.git
+.github
+.venv
+.pytest_cache
+.ruff_cache
+**/__pycache__
+build
+dist
+*.egg-info
+docs
+scripts
+suppliers
+tests
+data/*
+!data/forecasts.SYNTHETIC.json

@@ -1,0 +1,42 @@
+name: Bug report
+description: Something in the calendar, API or pipeline doesn't work as expected
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. Please don't paste real supplier responses, fares or credentials. Describe the shape instead, or use the synthetic data.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what you saw instead.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Run `python scripts/make_sample_logs.py`
+        2. ...
+    validations:
+      required: true
+  - type: dropdown
+    id: where
+    attributes:
+      label: Where
+      options: [Widget / UI, API, Supplier mapping (Gemma), Forecasting, Deployment / Docker, Other]
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: From `/api/health` ("version") or the release you installed.
+      placeholder: "1.0.0"
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs or screenshots
+      description: Redact anything private.

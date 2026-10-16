@@ -15,6 +15,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from farecal.ingest.logs import observations  # noqa: E402
 
+
 def report(rep):
     print(f"  searches {rep.searches:,} | folders {rep.folders:,} | linked {rep.linked:,} | "
           f"skipped (return/premium cabins) {rep.skipped_trip:,}, (not 1 adult) {rep.skipped_multi_pax:,} | dropped: other currency {rep.dropped_currency:,}, implausible {rep.dropped_implausible:,}, route outliers {rep.dropped_outlier:,}, other-route legs {rep.dropped_other_route:,}")

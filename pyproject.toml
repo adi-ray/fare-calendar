@@ -1,19 +1,61 @@
+[build-system]
+requires = ["setuptools>=77", "wheel"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "fare-calendar"
-version = "0.1.0"
-description = "Lowest-fare date picker for B2B flight booking, forecast by the open-weight Chronos-Bolt model from your own search logs."
+dynamic = ["version"]
+description = "Cheapest-day fare calendar for B2B flight booking, built from your own search logs with open-weight models (Gemma 4 mappings, Chronos-Bolt forecasts)."
+readme = "README.md"
 requires-python = ">=3.10"
-license = { text = "MIT" }
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Aditya Ray" }]
+keywords = ["travel", "flights", "fare-calendar", "forecasting", "chronos", "gemma", "fastapi"]
+classifiers = [
+  "Development Status :: 5 - Production/Stable",
+  "Framework :: FastAPI",
+  "Intended Audience :: Developers",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Topic :: Office/Business",
+  "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+# Core: ingest, engine and API. Forecasting models are an extra so the API and CI stay light.
 dependencies = [
-  "chronos-forecasting>=1.5",
   "fastapi>=0.110",
   "uvicorn[standard]>=0.29",
   "pandas>=2.1",
+  "numpy>=1.26",
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8", "httpx>=0.27"]
+forecast = ["chronos-forecasting>=1.5"]
+dev = ["pytest>=8", "httpx>=0.27", "ruff>=0.6", "build>=1.2"]
+
+[project.urls]
+Homepage = "https://github.com/adi-ray/fare-calendar"
+Demo = "https://fare-calendar-demo.onrender.com"
+Changelog = "https://github.com/adi-ray/fare-calendar/blob/main/CHANGELOG.md"
+Issues = "https://github.com/adi-ray/fare-calendar/issues"
+
+[tool.setuptools.dynamic]
+version = { attr = "farecal.__version__" }
+
+[tool.setuptools.packages.find]
+include = ["farecal*"]
 
 [tool.pytest.ini_options]
 pythonpath = ["."]
 testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 130
+target-version = "py310"
+extend-exclude = ["data", "suppliers"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP"]
+ignore = ["E501", "B008"]  # long lines are wrapped by judgement; FastAPI uses calls in defaults

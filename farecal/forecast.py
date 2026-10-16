@@ -85,7 +85,8 @@ class Ensemble:
         runs = [m.predict(series, horizon) for m in self.members]
         out = []
         for i in range(len(series)):
-            avg = lambda attr: sum(w * getattr(r[i], attr) for w, r in zip(self.weights, runs))  # noqa: E731
+            def avg(attr: str, i: int = i):
+                return sum(w * getattr(r[i], attr) for w, r in zip(self.weights, runs, strict=True))
             out.append(Forecast(avg("low"), avg("mid"), avg("high")))
         return out
 

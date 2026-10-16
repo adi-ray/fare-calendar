@@ -328,6 +328,7 @@ def test_last_alias_and_route_mismatch_names_both_routes():
 
 def test_log_tree_end_to_end_filters_multi_pax_placeholders_and_outliers(tmp_path):
     import uuid
+
     from farecal.ingest.logs import link_key, observations
     root = tmp_path / "server-logs" / "logs"
     (root / "searches").mkdir(parents=True)

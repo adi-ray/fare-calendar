@@ -1,0 +1,21 @@
+name: Feature request
+description: Suggest an improvement for agents, operators or developers
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: Who runs into it, and when? (e.g. "An agent quoting a family of four…")
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: What would help
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives you've considered

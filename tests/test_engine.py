@@ -5,7 +5,7 @@ import pandas as pd
 import pytest
 
 from farecal import leadtime
-from farecal.data import clean, _resolve
+from farecal.data import _resolve, clean
 from farecal.engine import FareEngine
 from farecal.forecast import SeasonalNaive
 from scripts.make_sample_logs import generate
