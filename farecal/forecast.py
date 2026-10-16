@@ -52,7 +52,7 @@ class ChronosForecaster:
         import torch
         from chronos import BaseChronosPipeline
 
-        self.name = model_id or os.environ.get("FARECAL_MODEL_ID", "amazon/chronos-bolt-small")
+        self.name = model_id or os.environ.get("FARECAL_MODEL_ID", "amazon/chronos-bolt-base")
         self._torch = torch
         self._pipe = BaseChronosPipeline.from_pretrained(self.name, device_map="cpu", torch_dtype=torch.float32)
 
@@ -79,7 +79,7 @@ class Ensemble:
         self.members = members
         self.weights = np.asarray(weights or [1.0] * len(members), dtype=float)
         self.weights = self.weights / self.weights.sum()
-        self.name = "ensemble(" + "+".join(m.name.split("/")[-1] for m in members) + ")"
+        self.name = " + ".join(m.name.split("/")[-1] for m in members)
 
     def predict(self, series: list[np.ndarray], horizon: int) -> list[Forecast]:
         runs = [m.predict(series, horizon) for m in self.members]
@@ -91,9 +91,9 @@ class Ensemble:
 
 
 def get_forecaster(kind: str | None = None):
-    """FARECAL_FORECASTER: 'chronos' (default), 'naive' (offline baseline) or 'ensemble'
-    (Chronos + baseline, averaged). FARECAL_MODEL_ID picks the Chronos size."""
-    kind = (kind or os.environ.get("FARECAL_FORECASTER", "chronos")).lower()
+    """FARECAL_FORECASTER: 'ensemble' (default: Chronos-Bolt base + weekday baseline, averaged;
+    best on the real backtest), 'chronos' or 'naive'. FARECAL_MODEL_ID picks the Chronos size."""
+    kind = (kind or os.environ.get("FARECAL_FORECASTER", "ensemble")).lower()
     if kind == "naive":
         return SeasonalNaive()
     if kind == "ensemble":
