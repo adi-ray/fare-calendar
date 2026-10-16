@@ -48,27 +48,33 @@ The data is one month of production logs (Sep 15 – Oct 16, 2026): 2,327 search
 
 ### Supplier mappings
 
+All 11 mappings passed the same validator on 6 of 6 real responses.
+
 | | Suppliers | How |
 |---|---|---|
+| **Written by Gemma 4** | Kandhari, AirIQ, CheapFixDeparture, AIX, BatikAir, Scoot, Emirates | Local `gemma4` (7.5B, Q4) on a 4 GB laptop GPU, 1–6 attempts each with validator feedback |
 | Hand-written | Amadeus | Public GDS format, used as Gemma's worked example |
-| **Written by Gemma 4**, validated on 6/6 real responses each | Kandhari, AirIQ, CheapFixDeparture, AIX, BatikAir, Scoot | Local `gemma4` (7.5B, Q4) on a 4 GB laptop GPU, 1–3 attempts each |
-| Not mapped yet | Aeroprime, Emirates, IndiGo, OMS, SpiceJet, StarAir | Gemma got the rows right but not the route fields within 5 attempts. These need cross-references or sums across charges. |
+| Hand-written after Gemma didn't converge (11 attempts each) | IndiGo, SpiceJet, StarAir | IndiGo and SpiceJet split each fare into charges, with discounts stored as positive amounts (`sum:charges[ChargeType!=Discount] - sum:…[ChargeType=Discount]`). StarAir is NDC XML where Gemma kept looking for offers in the wrong section. |
+| Not mapped | OMS, Aeroprime | Left out on purpose. OMS is the agency's own inventory. |
 
-The 7 mappings give **113,850 fare observations on 560 routes**. Fixed-departure suppliers list a price for every date they sell, so one search reveals dozens of dated fares. Placeholders (some dates are listed at ₹100) and per-route outliers (outside 0.25×–4× the route median) are dropped and counted.
+The 11 mappings give **114,219 fare observations on 559 routes**. Fixed-departure suppliers list a price for every date they sell, so one search reveals dozens of dated fares. Rows are dropped, and counted, when they are:
+- placeholders (some dates are listed at ₹100)
+- per-route outliers outside 0.25×–4× the route median
+- individual legs of connecting itineraries (only the searched route is kept, except for multi-route inventory feeds)
 
 ### Backtest
 
-At five cutoff days (Oct 2–14), the calendar built only from earlier logs is compared with the lowest fare agents actually got over the next two days, on 8,639 searched dates.
+At five cutoff days (Oct 2–14), the calendar built only from earlier logs is compared with the lowest fare agents actually got over the next two days, on 8,621 searched dates.
 
 | | seen fares only (no model) | seasonal-naive | Chronos-Bolt |
 |---|---|---|---|
-| searched dates with a fare on the calendar | 17% | 24% | 24% |
-| error when showing a recent real fare ("seen") | 1.3% | 1.3% | 1.3% |
-| error on estimated dates (MAPE, 581 dates) | n/a | **20.2%** | 20.8% |
+| searched dates with a fare on the calendar | 17% | 23% | 23% |
+| error when showing a recent real fare ("seen") | 1.2% | 1.2% | 1.2% |
+| error on estimated dates (MAPE, 498 dates) | n/a | **18.4%** | 20.1% |
 
 What the numbers say:
-- **The calendar's value today is coverage.** It puts a number on 24% of the dates agents go on to search, against 17% from recent fares alone, and the recent fares are accurate.
-- **Estimates are rough (about 20% off), and Chronos-Bolt is not beating a simple same-weekday baseline on this data.** On Amadeus alone (18 estimated dates) it did, at 4.4% against 10.4%, but that sample was too small to trust. With one month of history and fares that mix GDS and fixed-departure inventory, the series is short and noisy.
+- **The calendar's value today is coverage.** It puts a number on 23% of the dates agents go on to search, against 17% from recent fares alone, and the recent fares are accurate.
+- **Estimates are rough (18–20% off), and Chronos-Bolt is not beating a simple same-weekday baseline on this data.** On Amadeus alone (18 estimated dates) it did, at 4.4% against 10.4%, but that sample was too small to trust. With one month of history and fares that mix GDS and fixed-departure inventory, the series is short and noisy.
 - The UI marks estimates as "est." with a likely range, and both are indicative only.
 
 Re-run `scripts/backtest.py` as months of logs accumulate. Chronos is zero-shot, so more history should help it more than the baseline.
