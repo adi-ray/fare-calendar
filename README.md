@@ -44,14 +44,34 @@ server logs ──► Gemma-written supplier mappings ──► fare observation
 
 ## Results on real logs
 
-30 days of production logs (Sep 15 – Oct 15, 2026): 2,250 searches, 16 agents. Amadeus mapping only so far: 627 observations, 72 routes. Backtest: at five cutoff days, the calendar built from earlier logs is compared with the lowest fare agents got over the next two days.
+The data is one month of production logs (Sep 15 – Oct 16, 2026): 2,327 searches by 16 agents across 13 suppliers, plus a 150-search scan through the test environment. Only one-way economy searches for a single adult are used (85% of traffic), so every supplier's figure is a per-adult fare.
 
-| | seen fares only (no model) | seasonal-naive | **Chronos-Bolt** |
+### Supplier mappings
+
+| | Suppliers | How |
+|---|---|---|
+| Hand-written | Amadeus | Public GDS format, used as Gemma's worked example |
+| **Written by Gemma 4**, validated on 6/6 real responses each | Kandhari, AirIQ, CheapFixDeparture, AIX, BatikAir, Scoot | Local `gemma4` (7.5B, Q4) on a 4 GB laptop GPU, 1–3 attempts each |
+| Not mapped yet | Aeroprime, Emirates, IndiGo, OMS, SpiceJet, StarAir | Gemma got the rows right but not the route fields within 5 attempts. These need cross-references or sums across charges. |
+
+The 7 mappings give **113,850 fare observations on 560 routes**. Fixed-departure suppliers list a price for every date they sell, so one search reveals dozens of dated fares. Placeholders (some dates are listed at ₹100) and per-route outliers (outside 0.25×–4× the route median) are dropped and counted.
+
+### Backtest
+
+At five cutoff days (Oct 2–14), the calendar built only from earlier logs is compared with the lowest fare agents actually got over the next two days, on 8,639 searched dates.
+
+| | seen fares only (no model) | seasonal-naive | Chronos-Bolt |
 |---|---|---|---|
-| searched dates with a fare on the calendar | 12% | 39% | **39%** |
-| error on estimated dates (MAPE) | n/a | 10.4% | **4.4%** |
+| searched dates with a fare on the calendar | 17% | 24% | 24% |
+| error when showing a recent real fare ("seen") | 1.3% | 1.3% | 1.3% |
+| error on estimated dates (MAPE, 581 dates) | n/a | **20.2%** | 20.8% |
 
-Small sample (66 searched dates, 18 estimated). Mapping the other 12 suppliers with Gemma is what grows coverage. Re-run `scripts/backtest.py` after each new mapping.
+What the numbers say:
+- **The calendar's value today is coverage.** It puts a number on 24% of the dates agents go on to search, against 17% from recent fares alone, and the recent fares are accurate.
+- **Estimates are rough (about 20% off), and Chronos-Bolt is not beating a simple same-weekday baseline on this data.** On Amadeus alone (18 estimated dates) it did, at 4.4% against 10.4%, but that sample was too small to trust. With one month of history and fares that mix GDS and fixed-departure inventory, the series is short and noisy.
+- The UI marks estimates as "est." with a likely range, and both are indicative only.
+
+Re-run `scripts/backtest.py` as months of logs accumulate. Chronos is zero-shot, so more history should help it more than the baseline.
 
 ## Run
 
@@ -111,6 +131,8 @@ Prefer proxying through your portal's backend over putting `api-key` in the brow
 - Fares are **indicative supplier net fares before agency markup**, not bookable offers. Always reprice live.
 - Lead-time buckets with little data (searches 0–7 days out) are extrapolated.
 - Holidays aren't covariates yet.
+- Fixed-departure (group) fares and GDS fares are mixed. "Lowest" can be a group fare with few seats left.
+- Some BatikAir connecting itineraries are priced far above other suppliers. They rarely win "lowest", and route outliers beyond 4× the median are dropped.
 
 ## License
 
