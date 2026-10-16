@@ -84,9 +84,11 @@ class Report:
     errors: dict = field(default_factory=dict)
     dropped_currency: int = 0
     dropped_implausible: int = 0
+    dropped_outlier: int = 0
 
 
 def observations(root: str | Path, spec_dir: str | Path, *, env: str = "production", base_currency: str = "INR",
+                 min_fare: float = 500,
                  oneway_economy_only: bool = True, single_adult_only: bool = True,
                  limit: int | None = None) -> tuple[pd.DataFrame, Report]:
     """env tags every row (e.g. "production", "test") so sandbox fares can be filtered out later."""
@@ -142,9 +144,17 @@ def observations(root: str | Path, spec_dir: str | Path, *, env: str = "producti
         # dropped rather than mixed into an INR calendar. Implausible values are dropped too.
         df["currency"] = df["currency"].fillna(base_currency)
         other = df["currency"] != base_currency
-        odd = ~df["fare"].between(50, 2_000_000)
+        odd = ~df["fare"].between(min_fare, 2_000_000)
         rep.dropped_currency, rep.dropped_implausible = int(other.sum()), int((odd & ~other).sum())
         df = df[~other & ~odd]
+        # Placeholders ("100" for on-request seats) and odd itineraries would win a lowest-fare
+        # calendar outright. On routes with enough data, keep fares within 0.25x-4x the median.
+        route = df["origin"] + "-" + df["destination"]
+        med = df.groupby(route)["fare"].transform("median")
+        n = df.groupby(route)["fare"].transform("size")
+        outlier = (n >= 20) & ((df["fare"] < 0.25 * med) | (df["fare"] > 4 * med))
+        rep.dropped_outlier = int(outlier.sum())
+        df = df[~outlier]
         # Lowest fare per search, supplier, route and date: that's what the agent saw.
         df = (df.groupby(cols[:4] + cols[5:], dropna=False)["fare"].min().reset_index())
     df["env"] = env

@@ -324,3 +324,33 @@ def test_last_alias_and_route_mismatch_names_both_routes():
     assert any("rows give DEL-KUL but the agent searched DEL-DPS" in p for p in problems)
     last = {**first, "fields": {**first["fields"], "destination": "segs[last].d"}}
     assert gemma.validate(last, [gemma.Sample(doc, meta, "x")] * 3)[0] == []
+
+
+def test_log_tree_end_to_end_filters_multi_pax_placeholders_and_outliers(tmp_path):
+    import uuid
+    from farecal.ingest.logs import link_key, observations
+    root = tmp_path / "server-logs" / "logs"
+    (root / "searches").mkdir(parents=True)
+    specs = tmp_path / "suppliers"
+    specs.mkdir()
+    (specs / "examplefix.json").write_text(json.dumps({**FIXED_SPEC, "supplier": "examplefix", "files": ["SEARCH_RS.json"]}))
+    lines = []
+    for i in range(25):
+        rid = str(uuid.uuid4())
+        adults = 2 if i == 0 else 1
+        lines.append(json.dumps({"ts": f"2026-10-{1 + i % 9:02d}T09:00:00+00:00", "request_id": rid, "trip_type": "ONEWAY",
+                                 "cabin_class": "ECONOMY", "adult": adults, "children": 0, "infants": 0,
+                                 "origin": "DEL", "destination": "DXB", "departure_date": "2026-11-03"}))
+        price = 100 if i == 1 else (99000 if i == 2 else 15000 + i)       # placeholder, outlier, normal
+        doc = {"payload": {"sectors": [{"origin": "DEL", "destination": "DXB",
+                                        "dates": [{"date": "2026-11-03", "price": price}]}]}}
+        d = root / "2026-10-01" / f"flights-search-batch-{link_key(rid)}_org1-user1" / "examplefix"
+        d.mkdir(parents=True)
+        (d / "SEARCH_RS.json").write_text(json.dumps(doc))
+    (root / "searches" / "2026-10-01.jsonl").write_text("\n".join(lines))
+
+    df, rep = observations(tmp_path / "server-logs", specs)
+    assert rep.linked == 25 and rep.skipped_multi_pax == 1
+    assert rep.dropped_implausible == 1 and rep.dropped_outlier == 1
+    # 22 searches kept; lowest per search time+route+date leaves one row per distinct timestamp (9).
+    assert len(df) == 9 and df["fare"].between(15000, 15030).all()
