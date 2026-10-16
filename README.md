@@ -3,7 +3,7 @@
 A date picker for B2B flight booking that shows the **estimated lowest fare under every date** *before* the agent runs a live search. It's built from the booking platform's own server logs and runs on two open-weight models, with no fare data leaving the agency:
 
 - **Gemma 4** (local, via Ollama) reads each supplier's response format and writes the mapping that pulls fares out of it.
-- **Chronos-Bolt** (CPU) forecasts the lowest fare for dates nobody has searched recently.
+- **Chronos-Bolt** (CPU), averaged with a weekday baseline, estimates the lowest fare for dates nobody has searched recently.
 
 ![calendar](docs/calendar.jpg)
 
@@ -64,17 +64,28 @@ The 11 mappings give **114,219 fare observations on 559 routes**. Fixed-departur
 
 ### Backtest
 
-At five cutoff days (Oct 2–14), the calendar built only from earlier logs is compared with the lowest fare agents actually got over the next two days, on 8,621 searched dates.
+For each of 14 cutoff days (Oct 1–14), the calendar is built only from earlier logs and compared with the lowest fare agents actually got over the next two days, across 11,544 searched dates.
 
-| | seen fares only (no model) | seasonal-naive | Chronos-Bolt |
+| | seen fares only (no model) | weekday baseline | **Chronos-Bolt base + baseline** |
 |---|---|---|---|
-| searched dates with a fare on the calendar | 17% | 23% | 23% |
-| error when showing a recent real fare ("seen") | 1.2% | 1.2% | 1.2% |
-| error on estimated dates (MAPE, 498 dates) | n/a | **18.4%** | 20.1% |
+| searched dates with a fare on the calendar | 36% | 41% | 41% |
+| error when showing a recent real fare ("seen") | 1.0% | 1.0% | 1.0% |
+| error on estimated dates (MAPE, 591 dates) | n/a | 18.7% | **16.2%** |
+
+Picking the forecaster (5 cutoffs, 498 estimated dates):
+
+| forecaster | error on estimated dates |
+|---|---|
+| weekday baseline (median of the last 4 same weekdays) | 18.4% |
+| Chronos-Bolt small, alone | 20.1% |
+| Chronos-Bolt base, alone | 17.6% |
+| Chronos-Bolt small + baseline, averaged | 17.9% |
+| **Chronos-Bolt base + baseline, averaged** (default) | **15.1%** |
 
 What the numbers say:
-- **The calendar's value today is coverage.** It puts a number on 23% of the dates agents go on to search, against 17% from recent fares alone, and the recent fares are accurate.
-- **Estimates are rough (18–20% off), and Chronos-Bolt is not beating a simple same-weekday baseline on this data.** On Amadeus alone (18 estimated dates) it did, at 4.4% against 10.4%, but that sample was too small to trust. With one month of history and fares that mix GDS and fixed-departure inventory, the series is short and noisy.
+- **Coverage is the main gain.** The calendar puts a number on 41% of the dates agents go on to search, against 36% from recent fares alone, and the recent fares are accurate.
+- **Estimates are rough but improving.** Chronos-Bolt *small* on its own didn't beat a same-weekday baseline. The bigger *base* model averaged with that baseline does, with about 13% fewer errors over 14 cutoffs (16.2% against 18.7%). The two make different mistakes, which is why averaging helps.
+- **One check went the other way.** On a separate 5-day subset with only 63 estimated dates, the ensemble was slightly worse (20.3% against 19.0%). With one month of noisy, mixed GDS and fixed-departure history, expect the gap to move as data accumulates.
 - The UI marks estimates as "est." with a likely range, and both are indicative only.
 
 Re-run `scripts/backtest.py` as months of logs accumulate. Chronos is zero-shot, so more history should help it more than the baseline.
@@ -108,7 +119,9 @@ Demo with synthetic data: `python scripts/make_sample_logs.py`, then `FARECAL_AR
 | `FARECAL_API_KEY` | *(unset)* | `X-Api-Key` for embedding |
 | `FARECAL_ADMIN_TOKEN` | *(unset)* | enables `POST /api/admin/artifact` |
 | `FARECAL_CORS_ORIGINS` | `*` | your booking portal's origin |
-| `FARECAL_MODEL_ID` | `amazon/chronos-bolt-small` | or `-tiny` / `-base` |
+| `FARECAL_FORECASTER` | `ensemble` | `chronos` (alone) or `naive` (no model download) |
+| `FARECAL_MODEL_ID` | `amazon/chronos-bolt-base` | or `-small` / `-tiny` |
+| `FARECAL_CHRONOS_BATCH` | `64` | lower it on machines with little free RAM |
 | `GEMMA_MODEL` / `GEMMA_BASE_URL` | `gemma4` / `http://localhost:11434/v1` | any OpenAI-compatible Gemma server |
 
 ## Deploy (Render)
