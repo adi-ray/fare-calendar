@@ -31,8 +31,8 @@ import re
 from datetime import date, datetime
 
 REQUIRED_FIELDS = ("fare", "departure_date", "origin", "destination")
-_SEG = re.compile(r"^([^\[\]{}]*)((?:\[(?:\*|-?\d+)\]|\{\*\})*)$")
-_TOK = re.compile(r"\[(\*|-?\d+)\]|(\{\*\})")  # [*] list items, [n] / [-1] index, {*} object values
+_SEG = re.compile(r"^([^\[\]{}]*)((?:\[(?:\*|-?\d+|[^\[\]=!]+!?=[^\[\]]+)\]|\{\*\})*)$")
+_TOK = re.compile(r"\[(\*|-?\d+|[^\[\]=!]+!?=[^\[\]]+)\]|(\{\*\})")  # [*], [n], [-1], [key=value], {*}
 DATE_FORMATS = ("%Y-%m-%d", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%dT%H:%M", "%d%m%y", "%d-%m-%Y", "%d/%m/%Y",
                 "%d %b %Y", "%d-%b-%Y", "%d %B %Y", "%Y/%m/%d", "%d.%m.%Y", "%Y%m%d")
 
@@ -150,7 +150,7 @@ def lint_rows(doc, path: str) -> str | None:
         for node in states:
             pending = [_get(node, key)]
             for i in idxs:
-                pending = [x for c in pending for x in (_children(c, i) if i in ("*", "~") else ([_at(_as_list(c), i)] if _at(_as_list(c), i) is not None else []))]
+                pending = [x for c in pending for x in (_children(c, i) if _is_wild(i) else ([_at(_as_list(c), i)] if _at(_as_list(c), i) is not None else []))]
             nxt += [c for c in pending if c is not None]
         if n < len(segs) - 1 and nxt and any(isinstance(x, list) for x in nxt) and idxs and idxs[-1] == "*":
             name = key + "".join(_fmt(i) for i in idxs)
@@ -169,7 +169,7 @@ def explain_rows(doc, path: str) -> str | None:
             child = _get(node, key)
             pending = [child]
             for i in idxs:
-                pending = [x for c in pending for x in (_children(c, i) if i in ("*", "~") else [_at(_as_list(c), i)] if _at(_as_list(c), i) is not None else [])]
+                pending = [x for c in pending for x in (_children(c, i) if _is_wild(i) else [_at(_as_list(c), i)] if _at(_as_list(c), i) is not None else [])]
             nxt += [c for c in pending if c is not None]
         if not nxt:
             keys = sorted({k for n in states if isinstance(n, dict) for k in n} |
@@ -223,9 +223,9 @@ def _ancestor_rewrite(field_path: str, rows_path: str) -> str | None:
         shared += 1
     if shared == 0 or shared == len(f):
         return None
-    wild = lambda segs: sum(1 for _k, ix in segs for i in ix if i in ("*", "~"))  # noqa: E731
+    wild = lambda segs: sum(1 for _k, ix in segs for i in ix if _is_wild(i))  # noqa: E731
     # Resume after the LAST wildcard in the shared part: that element is the row's ancestor.
-    j = max((n for n in range(shared) if any(i in ("*", "~") for i in r[n][1])), default=None)
+    j = max((n for n in range(shared) if any(_is_wild(i) for i in r[n][1])), default=None)
     if j is None:
         return prefix + "$." + field_path   # no iteration shared: it's simply a root path
     ups = wild(r) - wild(r[:j + 1])
@@ -266,8 +266,8 @@ def _explain_field(path: str, stack: list, doc) -> str | None:
                        f"so use '{prefix}{done + '.' if done else ''}{tail}'")
             return f"'{key}' missing at {at}; keys there: {keys[:20]}{fix or '.' + _suggest(key, node)}"
         for i in idxs:
-            lst = _children(child, i) if i in ("*", "~") else _as_list(child)
-            child = next((x for x in lst if x not in (None, "", {}, [])), None) if i in ("*", "~") else _at(lst, i)
+            lst = _children(child, i) if _is_wild(i) else _as_list(child)
+            child = next((x for x in lst if x not in (None, "", {}, [])), None) if _is_wild(i) else _at(lst, i)
         if child is None:
             return f"'{key}' is an empty list"
         walked.append(key + "".join(_fmt(i) for i in idxs))
@@ -292,7 +292,7 @@ def _expand(doc, path: str) -> list[list]:
             for i in idxs:
                 expanded = []
                 for c, st in pending:
-                    if i in ("*", "~"):
+                    if _is_wild(i):
                         expanded += [(x, st + [x]) for x in _children(c, i)]
                     else:
                         lst = _as_list(c)
@@ -316,8 +316,8 @@ def _walk(path: str, stack: list, doc):
     for key, idxs in (_split(path) if path else []):
         node = _get(node, key)
         for i in idxs:
-            lst = _children(node, i) if i in ("*", "~") else _as_list(node)
-            node = next((x for x in lst if x not in (None, "", {}, [])), None) if i in ("*", "~") else _at(lst, i)
+            lst = _children(node, i) if _is_wild(i) else _as_list(node)
+            node = next((x for x in lst if x not in (None, "", {}, [])), None) if _is_wild(i) else _at(lst, i)
         if node is None:
             return None
     return node
@@ -336,7 +336,7 @@ def _all(path: str, stack: list, doc) -> list:
     for key, idxs in (_split(path) if path else []):
         nodes = [_get(n, key) for n in nodes]
         for i in idxs:
-            nodes = [x for n in nodes for x in (_children(n, i) if i in ("*", "~")
+            nodes = [x for n in nodes for x in (_children(n, i) if _is_wild(i)
                      else ([_at(_as_list(n), i)] if _at(_as_list(n), i) is not None else []))]
         nodes = [n for n in nodes if n is not None]
     return [_leaf(n) for n in nodes]
@@ -383,11 +383,25 @@ def _find_below(node, key: str, max_depth: int):
     return None
 
 
+def _terms(path: str) -> list[tuple[int, str]]:
+    """'sum:a - sum:b + sum:c' -> [(1, 'a'), (-1, 'b'), (1, 'c')]."""
+    out, sign = [], 1
+    for part in re.split(r"\s+([+-])\s+", path):
+        if part in ("+", "-"):
+            sign = -1 if part == "-" else 1
+            continue
+        out.append((sign, part[4:] if part.startswith("sum:") else part))
+    return out
+
+
 def _resolve(path: str, stack: list, doc, meta: dict):
     if path.startswith("sum:"):
-        vals = [_number(v) for v in _all(path[4:], stack, doc)]
-        vals = [v for v in vals if v is not None]
-        return sum(vals) if vals else None
+        total, any_value = 0.0, False
+        for sign, term in _terms(path):
+            vals = [v for v in (_number(x) for x in _all(term, stack, doc)) if v is not None]
+            total += sign * sum(vals)
+            any_value |= bool(vals)
+        return total if any_value else None
     if path.startswith("="):
         return path[1:]
     if path.startswith("meta."):
@@ -405,8 +419,8 @@ def _resolve(path: str, stack: list, doc, meta: dict):
     for key, idxs in _split(path):
         node = _get(node, key)
         for i in idxs:
-            lst = _children(node, i) if i in ("*", "~") else _as_list(node)
-            if i in ("*", "~"):
+            lst = _children(node, i) if _is_wild(i) else _as_list(node)
+            if _is_wild(i):
                 node = next((x for x in lst if x not in (None, "", {}, [])), None)
             else:
                 node = _at(lst, i)
@@ -431,7 +445,7 @@ def _split(path: str):
         m = _SEG.match(raw.strip())
         if not m or not (m.group(1) or m.group(2)):
             raise SpecError(f"bad path segment '{raw}' in '{path}'")
-        segs.append((m.group(1), [t.group(1) or "~" for t in _TOK.finditer(m.group(2))]))
+        segs.append((m.group(1), [_token(t) for t in _TOK.finditer(m.group(2))]))
     return segs
 
 
@@ -445,10 +459,25 @@ def _get(node, key):
     return None
 
 
+def _token(t) -> str:
+    if t.group(2):
+        return "~"
+    raw = t.group(1)
+    return raw if raw == "*" or re.fullmatch(r"-?\d+", raw) else "?" + raw.strip()
+
+
+def _is_wild(token: str) -> bool:
+    return token in ("*", "~") or token.startswith("?")
+
+
 def _children(x, token: str) -> list:
     """[*] walks list items (a lone object counts as one); {*} walks an object's values."""
     if token == "~" and isinstance(x, dict):
         return list(x.values())
+    if token.startswith("?"):
+        key, neg, want = re.match(r"\?(.+?)(!?)=(.+)", token).groups()
+        hit = lambda it: str(_leaf(_get(it, key.strip()))).strip().upper() == want.strip().upper()  # noqa: E731
+        return [it for it in _as_list(x) if (not hit(it)) == bool(neg)]
     return _as_list(x)
 
 
@@ -459,7 +488,9 @@ def _at(lst: list, token: str):
 
 
 def _fmt(token: str) -> str:
-    return "{*}" if token == "~" else f"[{token}]"
+    if token == "~":
+        return "{*}"
+    return f"[{token[1:]}]" if token.startswith("?") else f"[{token}]"
 
 
 def _as_list(x):

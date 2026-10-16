@@ -34,6 +34,7 @@ Path language:
 - A list of lists needs one wildcard per level: "groups[*][*].offers[*]".
 - If the whole response is a list, start 'rows' with "[*]".
 - "sum:charges[*].amount" adds every match: use it when a passenger's price is split into charges (base fare, taxes, fees) with no total field.
+- "items[key=VALUE]" / "items[key!=VALUE]" keep only matching list items; "sum:A - sum:B" subtracts (e.g. discounts stored as positive amounts).
 - "{*}" walks the VALUES of an object whose keys are ids/codes (e.g. {"0~AB~X1": {...}, "0~AB~X2": {...}}): "faresAvailable{*}".
 - rows: ONE path that contains [*] or {*} and lands on the objects that each carry ONE price (expand every list on the way with [*]).
 - "^.x" reads x from one [*] level above the row, "^^.x" two levels above. "$.a.b" reads from the document root.

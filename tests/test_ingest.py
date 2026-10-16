@@ -354,3 +354,16 @@ def test_log_tree_end_to_end_filters_multi_pax_placeholders_and_outliers(tmp_pat
     assert rep.dropped_implausible == 1 and rep.dropped_outlier == 1
     # 22 searches kept; lowest per search time+route+date leaves one row per distinct timestamp (9).
     assert len(df) == 9 and df["fare"].between(15000, 15030).all()
+
+
+def test_item_filters_and_signed_sums_for_navitaire_charges():
+    from farecal.ingest.spec import _split
+    doc = {"PaxFare": [{"PaxType": "ADT", "ServiceCharges": {"BookingServiceCharge": [
+        {"ChargeType": "FarePrice", "Amount": "5000"}, {"ChargeType": "Tax", "Amount": "900"},
+        {"ChargeType": "Discount", "Amount": "300"}]}}]}
+    sc = "ServiceCharges.BookingServiceCharge"
+    spec = {"rows": "PaxFare[*]", "where": {"PaxType": "ADT"},
+            "fields": {"fare": f"sum:{sc}[ChargeType!=Discount].Amount - sum:{sc}[ChargeType=Discount].Amount",
+                       "origin": "meta.origin", "destination": "meta.destination", "departure_date": "meta.departure_date"}}
+    assert extract(spec, doc, META)[0]["fare"] == 5600.0
+    assert _split("a.b[ChargeType!=Discount].c")[1] == ("b", ["?ChargeType!=Discount"])
