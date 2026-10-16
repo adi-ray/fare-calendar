@@ -1,6 +1,6 @@
 # Fare Calendar API: serves a precomputed forecasts.json (no PyTorch in the image).
 # Build forecasts where your logs live (scripts/build_artifact.py) and mount or upload them.
-FROM python:3.12-slim
+FROM python:3.14-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
