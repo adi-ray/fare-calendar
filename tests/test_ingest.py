@@ -297,3 +297,19 @@ def test_missing_key_suggestions():
     spec["fields"]["fare"] = "sum:ServiceCharges.x"
     msg = " ".join(explain_fields(spec, doc, META))
     assert "exists further down at 'Fares.Fare[*].PaxFares.PaxFare[*].ServiceCharges'" in msg
+
+
+def test_rewrite_resumes_after_the_last_shared_wildcard_and_extract_falls_back():
+    from farecal.ingest.spec import _ancestor_rewrite
+    rows = "data.routes[*].byDate.options[*].groups[*].fares[*]"
+    assert _ancestor_rewrite("data.routes[*].byDate.dateList", rows) == "^^^.byDate.dateList"
+    assert _ancestor_rewrite("data.meta.currency", "data.items[*]") == "$.data.meta.currency"
+    doc = {"data": {"routes": [{"byDate": {"dateList": "2026-11-03", "options": [{"segment": {"from": "DEL", "to": "BOM"},
+           "groups": [{"fares": [{"price": 4100}]}]}]}}]}}
+    spec = {"rows": rows, "fields": {"fare": "price",
+            "origin": "data.routes[*].byDate.options[*].segment.from",          # written from the top
+            "destination": "data.routes[*].byDate.options[*].segment.to",
+            "departure_date": "data.routes[*].byDate.dateList"}}
+    rows_out = extract(spec, doc, META)
+    assert [(r["origin"], r["destination"], str(r["departure_date"]), r["fare"]) for r in rows_out] == [
+        ("DEL", "BOM", "2026-11-03", 4100.0)]

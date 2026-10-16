@@ -62,10 +62,18 @@ def extract(spec: dict, doc, meta: dict | None = None) -> list[dict]:
     check_spec(spec)
     meta = meta or {}
     out = []
+    # A field written from the top along the 'rows' path means "this row's own ancestor";
+    # used as a fallback when the path doesn't resolve from the row.
+    alt = {k: _ancestor_rewrite(p, spec["rows"]) for k, p in spec["fields"].items()}
     for stack in _expand(doc, spec["rows"]):
         if not _matches(spec.get("where", {}), stack, doc, meta):
             continue
-        row = {k: _resolve(p, stack, doc, meta) for k, p in spec["fields"].items()}
+        row = {}
+        for k, p in spec["fields"].items():
+            v = _resolve(p, stack, doc, meta)
+            if v in (None, "") and alt[k]:
+                v = _resolve(alt[k], stack, doc, meta)
+            row[k] = v
         fare = parse_fare(row.get("fare"))
         dep = parse_date(row.get("departure_date"), spec.get("date_format"))
         o, d = _code(row.get("origin")), _code(row.get("destination"))
@@ -216,9 +224,15 @@ def _ancestor_rewrite(field_path: str, rows_path: str) -> str | None:
     if shared == 0 or shared == len(f):
         return None
     wild = lambda segs: sum(1 for _k, ix in segs for i in ix if i in ("*", "~"))  # noqa: E731
-    ups = wild(r) - wild(r[:shared])
-    tail = ".".join(k + "".join(_fmt(i) for i in ix) for k, ix in f[shared:])
-    return prefix + (("^" * ups + "." + tail) if ups else tail)
+    # Resume after the LAST wildcard in the shared part: that element is the row's ancestor.
+    j = max((n for n in range(shared) if any(i in ("*", "~") for i in r[n][1])), default=None)
+    if j is None:
+        return prefix + "$." + field_path   # no iteration shared: it's simply a root path
+    ups = wild(r) - wild(r[:j + 1])
+    tail = ".".join(k + "".join(_fmt(i) for i in ix) for k, ix in f[j + 1:])
+    if not ups:
+        return prefix + tail
+    return prefix + "^" * ups + ("." + tail if tail else "")
 
 
 def _explain_field(path: str, stack: list, doc) -> str | None:
