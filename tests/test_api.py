@@ -100,6 +100,20 @@ def test_seed_file_used_when_upload_is_gone_and_newer_wins(tmp_path, monkeypatch
     assert c.get("/api/health").json()["as_of"] == "2026-06-03"
 
 
-def test_artifact_omits_nulls(art):
-    entries = [d for v in art["days"].values() for d in v]
-    assert entries and all(v is not None for d in entries for v in d.values())
+def test_v2_artifact_round_trips_the_engine():
+    from farecal.view import artifact_days
+    df = clean(generate(date(2025, 12, 1), TODAY - timedelta(days=1), per_day=8, seed=3).rename(columns={"lowest_fare": "fare"}))
+    eng = FareEngine(df, SeasonalNaive(), today=TODAY, horizon=60)
+    a = eng.to_artifact()
+    assert a["version"] == 2
+    days = {d["date"]: d for d in artifact_days(a, "DEL-BOM")}
+    for k in range(60):
+        e = eng.entry("DEL-BOM", TODAY + timedelta(days=k))
+        got = days.get(e["date"])
+        if e["fare"] is None:
+            assert got is None
+            continue
+        assert got["fare"] == e["fare"] and got["source"] == e["source"] and got["seen_at"] == e["seen_at"]
+        if e["source"] == "estimate":   # range stored as whole % of the fare: within 1% + rounding
+            assert abs(got["low"] - e["low"]) <= e["fare"] * 0.01 + 10
+            assert abs(got["high"] - e["high"]) <= e["fare"] * 0.01 + 10

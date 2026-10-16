@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import calendar as cal
-from datetime import date
+from datetime import date, timedelta
 
 
 def percentile(sorted_vals: list[float], q: float) -> float:
@@ -27,11 +27,37 @@ def tier(days: list[dict]) -> list[dict]:
     return days
 
 
+def artifact_routes(art: dict) -> list[str]:
+    return sorted(art.get("currency") or art.get("routes") or art.get("days") or {})
+
+
+def artifact_days(art: dict, route: str) -> list[dict]:
+    """Entries for one route from either artifact format (v1 rows, v2 columns)."""
+    if art.get("version", 1) == 1:
+        return art["days"].get(route, [])
+    col = art["routes"].get(route)
+    if not col:
+        return []
+    as_of = date.fromisoformat(art["as_of"])
+    out = []
+    for i, k in enumerate(col["o"]):
+        fare, est = col["f"][i], col["s"][i] == "e"
+        out.append({"date": (as_of + timedelta(days=k)).isoformat(), "fare": fare,
+                    "low": _pct(fare, col["lo"][i]) if est else None,
+                    "high": _pct(fare, col["hi"][i]) if est else None,
+                    "source": "estimate" if est else "seen", "seen_at": col["seen"].get(str(k))})
+    return out
+
+
+def _pct(fare: int, pct: int) -> int:
+    return int(round(fare * (1 + pct / 100) / 10.0) * 10)
+
+
 def month_from_artifact(art: dict, route: str, year: int, month: int) -> dict:
-    if route not in art["days"] and route not in art.get("currency", {}):
+    if route not in artifact_routes(art):
         raise KeyError(route)
     as_of = date.fromisoformat(art["as_of"])
-    by_date = {d["date"]: d for d in art["days"].get(route, [])}
+    by_date = {d["date"]: d for d in artifact_days(art, route)}
     days = []
     for n in range(1, cal.monthrange(year, month)[1] + 1):
         d = date(year, month, n)

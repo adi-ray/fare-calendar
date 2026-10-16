@@ -26,7 +26,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from .view import month_from_artifact
+from .view import artifact_routes, month_from_artifact
 
 ROOT = Path(__file__).resolve().parent.parent
 MODE = os.environ.get("FARECAL_MODE", "artifact").lower()
@@ -109,7 +109,7 @@ def info() -> dict:
         return {"model": eng.forecaster.name, "as_of": eng.today.isoformat(), "routes": eng.routes,
                 "label": "SYNTHETIC" if "SYNTHETIC" in DATA.name.upper() else "live data"}
     art = artifact()
-    return {"model": art["model"], "as_of": art["as_of"], "routes": sorted(art.get("currency", art["days"])),
+    return {"model": art["model"], "as_of": art["as_of"], "routes": artifact_routes(art),
             "label": art.get("label", ""), "built_at": art.get("built_at")}
 
 
@@ -157,16 +157,16 @@ async def upload_artifact(request: Request, x_admin_token: str = Header(default=
     try:
         art = json.loads(raw)
         date.fromisoformat(art["as_of"])
-        assert art.get("version") == 1 and isinstance(art["days"], dict) and art.get("model")
+        assert art.get("version") in (1, 2) and isinstance(art.get("days") or art.get("routes"), dict) and art.get("model")
     except (ValueError, KeyError, AssertionError, TypeError):
-        raise HTTPException(400, "Not a fare-calendar artifact (version 1)")
+        raise HTTPException(400, "Not a fare-calendar artifact (version 1 or 2)")
     ARTIFACT.parent.mkdir(parents=True, exist_ok=True)
     tmp = ARTIFACT.with_suffix(".tmp")
     tmp.write_bytes(raw)
     tmp.replace(ARTIFACT)
     with _lock:
         _state["artifact"] = art
-    return {"ok": True, "as_of": art["as_of"], "routes": len(art["days"])}
+    return {"ok": True, "as_of": art["as_of"], "routes": len(artifact_routes(art))}
 
 
 app.mount("/widget", StaticFiles(directory=ROOT / "widget"), name="widget")

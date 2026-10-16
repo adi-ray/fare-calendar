@@ -56,12 +56,17 @@ class ChronosForecaster:
         self._torch = torch
         self._pipe = BaseChronosPipeline.from_pretrained(self.name, device_map="cpu", torch_dtype=torch.float32)
 
-    def predict(self, series: list[np.ndarray], horizon: int) -> list[Forecast]:
+    def predict(self, series: list[np.ndarray], horizon: int, chunk: int = 256) -> list[Forecast]:
         # Chronos-Bolt masks NaNs natively, so gaps stay gaps instead of being invented.
-        ctx = [self._torch.tensor(np.asarray(s, dtype=float)[-2048:], dtype=self._torch.float32) for s in series]
-        q, _mean = self._pipe.predict_quantiles(ctx, prediction_length=horizon, quantile_levels=list(QUANTILES))
-        q = q.numpy()  # [batch, horizon, 3]
-        return [Forecast(q[i, :, 0], q[i, :, 1], q[i, :, 2]) for i in range(len(series))]
+        # Chunked: thousands of series in one batch exhaust memory and kill the process silently.
+        out: list[Forecast] = []
+        for start in range(0, len(series), chunk):
+            ctx = [self._torch.tensor(np.asarray(s, dtype=float)[-2048:], dtype=self._torch.float32)
+                   for s in series[start:start + chunk]]
+            q, _mean = self._pipe.predict_quantiles(ctx, prediction_length=horizon, quantile_levels=list(QUANTILES))
+            q = q.numpy()  # [batch, horizon, 3]
+            out += [Forecast(q[i, :, 0], q[i, :, 1], q[i, :, 2]) for i in range(len(ctx))]
+        return out
 
 
 def get_forecaster():

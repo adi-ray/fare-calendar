@@ -43,11 +43,15 @@ class FareEngine:
         self.obs = known
         self.est: dict[str, dict[date, tuple[float, float, float]]] = defaultdict(dict)
         self.currency = {r: g["currency"].mode().iat[0] for r, g in known.groupby("route")} if len(known) else {}
+        self._ref: dict = {}
         if not len(known):
             self.lead, self.day = pd.Series(0.0, index=leadtime.LABELS), pd.DataFrame(columns=["route", "departure_date", "log_ref", "n"])
             return
         self.lead, self.day = leadtime.fit(known)
         self._obs_index = known.groupby(["route", "departure_date"])
+        # O(1) per calendar day; scanning the frame per entry doesn't scale past a few routes.
+        self._ref = {(r, d): (lr, int(n)) for r, d, lr, n in
+                     self.day[["route", "departure_date", "log_ref", "n"]].itertuples(index=False)}
 
         jobs = []  # (route, start, length, context)
         for route, g in self.day.groupby("route"):
@@ -117,11 +121,11 @@ class FareEngine:
 
         # Older searches for this exact date still carry signal: re-price them for
         # today's lead time and blend in, trusting them less as they age.
-        ref = self.day[(self.day["route"] == route) & (self.day["departure_date"] == pd.Timestamp(d))]
-        if len(ref) and age is not None and age <= 60:
-            n = int(ref["n"].iat[0])
+        ref = self._ref.get((route, pd.Timestamp(d)))
+        if ref is not None and age is not None and age <= 60:
+            log_ref, n = ref
             w = n / (n + 3) * np.exp(-age / 14)
-            shift = w * (ref["log_ref"].iat[0] - mid)
+            shift = w * (log_ref - mid)
             low, mid, high = low + shift, mid + shift, high + shift
 
         out.update(fare=_round(np.exp(mid + mult)), low=_round(np.exp(low + mult)),
@@ -130,15 +134,28 @@ class FareEngine:
 
     # ---- export for the light API ---------------------------------------
     def to_artifact(self) -> dict:
-        """Every future date for every route, ready to serve without pandas or torch."""
-        days = {}
+        """Every future date for every route, ready to serve without pandas or torch.
+
+        Columnar (version 2) so it fits a Render Secret File (1 MB) at hundreds of routes:
+        per route, day offsets from as_of, fares, the likely range as % around the fare,
+        one source letter per day ('e' estimate, 's' seen) and seen timestamps by offset."""
+        routes = {}
         for route in self.routes:
-            entries = [self.entry(route, self.today + timedelta(days=k)) for k in range(self.horizon)]
-            # Nulls dropped to keep the file small (Render Secret Files cap at 1 MB).
-            days[route] = [{k: e[k] for k in ("date", "fare", "low", "high", "source", "seen_at") if e[k] is not None}
-                           for e in entries if e["fare"] is not None]
-        return {"version": 1, "as_of": self.today.isoformat(), "built_at": self.built_at,
-                "model": self.forecaster.name, "currency": self.currency, "days": days}
+            col = {"o": [], "f": [], "lo": [], "hi": [], "s": "", "seen": {}}
+            for k in range(self.horizon):
+                e = self.entry(route, self.today + timedelta(days=k))
+                if e["fare"] is None:
+                    continue
+                col["o"].append(k)
+                col["f"].append(e["fare"])
+                col["lo"].append(round((e["low"] / e["fare"] - 1) * 100) if e["low"] else 0)
+                col["hi"].append(round((e["high"] / e["fare"] - 1) * 100) if e["high"] else 0)
+                col["s"] += "s" if e["source"] == "seen" else "e"
+                if e["seen_at"]:
+                    col["seen"][str(k)] = e["seen_at"]
+            routes[route] = col
+        return {"version": 2, "as_of": self.today.isoformat(), "built_at": self.built_at,
+                "model": self.forecaster.name, "currency": self.currency, "routes": routes}
 
 
 def _round(x: float) -> int:

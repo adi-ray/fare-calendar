@@ -39,9 +39,9 @@ if __name__ == "__main__":
     Path(a.out).parent.mkdir(parents=True, exist_ok=True)
     Path(a.out).write_text(json.dumps(art, separators=(",", ":")), encoding="utf-8")
 
-    n_days = sum(len(v) for v in art["days"].values())
-    n_est = sum(1 for v in art["days"].values() for d in v if d["source"] == "estimate")
-    print(f"as of {art['as_of']} | {len(art['days'])} routes | {n_days} priced dates ({n_est} estimates, "
+    n_days = sum(len(v["o"]) for v in art["routes"].values())
+    n_est = sum(v["s"].count("e") for v in art["routes"].values())
+    print(f"as of {art['as_of']} | {len(art['routes'])} routes | {n_days} priced dates ({n_est} estimates, "
           f"{n_days - n_est} seen) | estimates on {len(eng.forecast_routes)} routes | {Path(a.out).stat().st_size/1024:.0f} KB -> {a.out}")
 
     if Path(a.out).stat().st_size > 900 * 1024:
