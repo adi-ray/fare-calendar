@@ -85,6 +85,7 @@ class Report:
     dropped_currency: int = 0
     dropped_implausible: int = 0
     dropped_outlier: int = 0
+    dropped_other_route: int = 0
 
 
 def observations(root: str | Path, spec_dir: str | Path, *, env: str = "production", base_currency: str = "INR",
@@ -132,6 +133,12 @@ def observations(root: str | Path, spec_dir: str | Path, *, env: str = "producti
                     rep.errors[sup] = rep.errors.get(sup, 0) + 1
                     log.debug("extract failed %s: %s", f, e)
                     continue
+                # Suppliers that answer one route and date per search: keep the searched route only,
+                # so a connecting itinerary's per-leg fares don't pose as fares for the legs.
+                if not spec.get("validation", {}).get("multi_date") and not spec.get("multi_route"):
+                    kept = [r for r in got if r["origin"] == m["origin"] and r["destination"] == m["destination"]]
+                    rep.dropped_other_route += len(got) - len(kept)
+                    got = kept
                 rep.rows_by_supplier[sup] = rep.rows_by_supplier.get(sup, 0) + len(got)
                 for r in got:
                     r.update(searched_at=m["ts"], supplier=sup)
