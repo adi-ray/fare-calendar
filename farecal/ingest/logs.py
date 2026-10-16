@@ -24,7 +24,7 @@ from .tree import load_any
 
 log = logging.getLogger(__name__)
 FOLDER = re.compile(r"^flights-search(?:-batch)?-([0-9a-f]{12})_")
-KEEP_META = ("ts", "origin", "destination", "departure_date", "trip_type", "cabin_class")
+KEEP_META = ("ts", "origin", "destination", "departure_date", "trip_type", "cabin_class", "adult", "children", "infants")
 
 
 FLOW_IN_ID = re.compile(r"flights-search(?:-batch)?-([0-9a-f]{12})")
@@ -77,6 +77,7 @@ class Report:
     folders: int = 0
     linked: int = 0
     skipped_trip: int = 0
+    skipped_multi_pax: int = 0
     rows_by_supplier: dict = field(default_factory=dict)
     files_by_supplier: dict = field(default_factory=dict)
     unmapped: dict = field(default_factory=dict)
@@ -86,7 +87,8 @@ class Report:
 
 
 def observations(root: str | Path, spec_dir: str | Path, *, env: str = "production", base_currency: str = "INR",
-                 oneway_economy_only: bool = True, limit: int | None = None) -> tuple[pd.DataFrame, Report]:
+                 oneway_economy_only: bool = True, single_adult_only: bool = True,
+                 limit: int | None = None) -> tuple[pd.DataFrame, Report]:
     """env tags every row (e.g. "production", "test") so sandbox fares can be filtered out later."""
     root = Path(root)
     meta = load_searches(root)
@@ -104,6 +106,11 @@ def observations(root: str | Path, spec_dir: str | Path, *, env: str = "producti
         rep.linked += 1
         if oneway_economy_only and (m.get("trip_type") != "ONEWAY" or (m.get("cabin_class") or "ECONOMY") != "ECONOMY"):
             rep.skipped_trip += 1
+            continue
+        # Some suppliers price a passenger type as a group (2 adults -> one total). Single-adult
+        # searches (85% of traffic) make every supplier's figure a per-adult fare.
+        if single_adult_only and ((m.get("adult") or 1) != 1 or (m.get("children") or 0) or (m.get("infants") or 0)):
+            rep.skipped_multi_pax += 1
             continue
         for sup_dir in (p for p in folder.iterdir() if p.is_dir()):
             sup = sup_dir.name

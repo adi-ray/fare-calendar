@@ -17,7 +17,7 @@ from farecal.ingest.logs import observations  # noqa: E402
 
 def report(rep):
     print(f"  searches {rep.searches:,} | folders {rep.folders:,} | linked {rep.linked:,} | "
-          f"skipped (return/premium cabins) {rep.skipped_trip:,} | dropped: other currency {rep.dropped_currency:,}, implausible {rep.dropped_implausible:,}")
+          f"skipped (return/premium cabins) {rep.skipped_trip:,}, (not 1 adult) {rep.skipped_multi_pax:,} | dropped: other currency {rep.dropped_currency:,}, implausible {rep.dropped_implausible:,}")
     for sup in sorted(rep.files_by_supplier):
         print(f"  {sup:<20} files {rep.files_by_supplier[sup]:>5}  rows {rep.rows_by_supplier.get(sup, 0):>7}  errors {rep.errors.get(sup, 0)}")
     if rep.unmapped:

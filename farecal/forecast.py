@@ -56,9 +56,11 @@ class ChronosForecaster:
         self._torch = torch
         self._pipe = BaseChronosPipeline.from_pretrained(self.name, device_map="cpu", torch_dtype=torch.float32)
 
-    def predict(self, series: list[np.ndarray], horizon: int, chunk: int = 256) -> list[Forecast]:
+    def predict(self, series: list[np.ndarray], horizon: int, chunk: int | None = None) -> list[Forecast]:
         # Chronos-Bolt masks NaNs natively, so gaps stay gaps instead of being invented.
         # Chunked: thousands of series in one batch exhaust memory and kill the process silently.
+        # Small batches keep peak memory low enough for an 8 GB laptop running other apps.
+        chunk = chunk or int(os.environ.get("FARECAL_CHRONOS_BATCH", "64"))
         out: list[Forecast] = []
         for start in range(0, len(series), chunk):
             ctx = [self._torch.tensor(np.asarray(s, dtype=float)[-2048:], dtype=self._torch.float32)
