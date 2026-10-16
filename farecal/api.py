@@ -117,12 +117,15 @@ def info() -> dict:
 # ---- routes --------------------------------------------------------------
 @app.get("/api/health")
 def health(request: Request):
-    """Public liveness check; details only for authorised callers."""
+    """Public liveness check; details only for authorised callers. 'commit' and 'files_found'
+    make a stale deploy or a missing Secret File obvious without exposing paths or data."""
+    deploy = {"commit": os.environ.get("RENDER_GIT_COMMIT", "")[:7] or None,
+              "files_found": sum(1 for p in [ARTIFACT, *SEEDS] if p.is_file())}
     try:
         details = info()
     except HTTPException as e:
-        return {"ok": False, "detail": e.detail}
-    return {"ok": True, **(details if _authorised(request) else {"as_of": details["as_of"]})}
+        return {"ok": False, "detail": e.detail, **deploy}
+    return {"ok": True, **deploy, **(details if _authorised(request) else {"as_of": details["as_of"]})}
 
 
 @app.get("/api/routes")
